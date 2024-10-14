@@ -8,6 +8,42 @@ interface Foo {
   baz: Int;
 }
 
+/** Observes an element and triggers events whenever the contents size changes. */
+@component("size-observer")
+class SizeObserver extends CustomElement<{
+  requiredEvents: {
+    sizeChange: { width: number; height: number };
+  };
+  htmlContent: "single";
+}> {
+  /** Number of milliseconds to debounce.  */
+  @api()
+  accessor debounce: number = 100;
+
+  #resizeObserver: ResizeObserver;
+  #timeout: NodeJS.Timeout | null = null;
+  connectedCallback(): void {
+    this.#resizeObserver = new ResizeObserver(() => {
+      if (this.#timeout == null) {
+        this.#timeout = setTimeout(() => {
+          this.triggerEvent("sizeChange", {
+            width: this.offsetWidth,
+            height: this.offsetHeight,
+          });
+          this.#timeout = null;
+        });
+      }
+    });
+
+    this.#resizeObserver.observe(this);
+  }
+
+  disconnectedCallback(): void {
+    this.#resizeObserver?.disconnect();
+    this.#timeout && clearTimeout(this.#timeout);
+  }
+}
+
 /**
  * Some doc comment
  */
