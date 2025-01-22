@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "esModuleInterop": true,
-    "target": "es6",
+    "target": "es2015",
     "moduleResolution": "node",
     "sourceMap": true,
     "outDir": "dist",
@@ -10,5 +10,6 @@
     "resolveJsonModule": true
   },
   "lib": ["es2015"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts"],
+  "include": ["src/**/*.ts", "example/**/*.ts"]
 }

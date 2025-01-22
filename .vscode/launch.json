@@ -1,0 +1,13 @@
+{
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Program",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["-o", "example/elm-webcomponents", "example/component.ts"],
+      "runtimeExecutable": "tsx",
+      "internalConsoleOptions": "neverOpen"
+    }
+  ]
+}

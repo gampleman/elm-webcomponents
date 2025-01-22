@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+import { toValueCase } from "./utils";
 
 export const buildType = (type: ts.Type, checker: ts.TypeChecker): string => {
   const todo = (name: string) => {
@@ -7,7 +8,7 @@ export const buildType = (type: ts.Type, checker: ts.TypeChecker): string => {
     );
     throw new Error(`${name} is not implemented for types`);
   };
-  console.log("building type", checker.typeToString(type));
+  // console.log("building type", checker.typeToString(type));
 
   switch (type.flags) {
     case ts.TypeFlags.Any:
@@ -77,9 +78,9 @@ export const buildType = (type: ts.Type, checker: ts.TypeChecker): string => {
       return `{ ${checker
         .getPropertiesOfType(type)
         .map((prop) => {
-          console.log("prop", prop.getName(), prop);
-          console.log(checker.getTypeAtLocation(prop.valueDeclaration));
-          return `${prop.getName()} : ${buildType(
+          // console.log("prop", prop.getName(), prop);
+          // console.log(checker.getTypeAtLocation(prop.valueDeclaration));
+          return `${toValueCase(prop.getName())} : ${buildType(
             checker.getTypeAtLocation(prop.valueDeclaration),
             checker
           )}`;

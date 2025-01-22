@@ -61,7 +61,7 @@ export const buildDecoder = (
       ${properties
         .map(
           (prop) =>
-            `|> Decode.map2 (<|) (Decode.field "${prop.getName()}" ${buildDecoder(
+            `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" ${buildDecoder(
               checker.getTypeAtLocation(prop.valueDeclaration),
               checker
             )})`

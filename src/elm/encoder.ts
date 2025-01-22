@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+import { toValueCase } from "./utils";
 
 const todo = (name: string) => {
   console.warn(`${name} is not implemented for encoders`);
@@ -20,7 +21,6 @@ export const buildEncoder = (
     case ts.TypeFlags.String:
       return `Encode.string ${value}`;
     case ts.TypeFlags.Number:
-      console.log("number", checker.typeToString(type));
       return `Encode.float ${value}`;
     case ts.TypeFlags.Boolean:
     case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
@@ -61,7 +61,7 @@ export const buildEncoder = (
           checker.getTypeArguments(type as ts.TypeReference)[0],
           "el",
           checker
-        )})) ${value}`;
+        )}) ${value}`;
       }
 
       return `Encode.object [ ${checker
@@ -70,11 +70,11 @@ export const buildEncoder = (
           (prop) =>
             `( "${prop.getName()}", ${buildEncoder(
               checker.getTypeAtLocation(prop.valueDeclaration),
-              `${value}.${prop.getName()}`,
+              `${value}.${toValueCase(prop.getName())}`,
               checker
             )} )`
         )
-        .join("\n    , ")}}]`;
+        .join("\n    , ")}]`;
 
     case ts.TypeFlags.Union:
       return todo("Union");

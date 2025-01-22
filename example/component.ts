@@ -1,4 +1,14 @@
-import { api, component, CustomElement } from "../src";
+import {
+  required,
+  optional,
+  lazy,
+  component,
+  CustomElement,
+  IsolatedCustomElement,
+  type HtmlContent,
+} from "../src";
+
+import style from "./app/styles";
 
 type Int = number;
 
@@ -15,9 +25,10 @@ class SizeObserver extends CustomElement<{
     sizeChange: { width: number; height: number };
   };
   htmlContent: "single";
+  viewFnName: "container";
 }> {
   /** Number of milliseconds to debounce.  */
-  @api()
+  @optional
   accessor debounce: number = 100;
 
   #resizeObserver: ResizeObserver;
@@ -58,11 +69,11 @@ class MyElement extends CustomElement<{
   };
 }> {
   /** Some more comments */
-  @api()
+  @optional
   accessor myProp: string = "default value";
 
   /** Some comments */
-  @api({ required: true, renderAfterSet: false })
+  @required
   accessor otherProp: Foo;
 
   render() {
@@ -84,16 +95,16 @@ type Root = {
 };
 
 @component("reacty-thing")
-class ReactyThing extends CustomElement<{}> {
+export class ReactyThing extends CustomElement<{ extraAttributes: false }> {
   #root: Root;
 
-  @api({ required: true })
+  @required
   accessor placeholders: Placeholder[];
 
-  @api({ required: true })
+  @required
   accessor disabled: boolean;
 
-  @api({ required: true })
+  @lazy
   accessor value: Placeholder | null;
 
   init() {
@@ -108,5 +119,26 @@ class ReactyThing extends CustomElement<{}> {
       .map((p) => p.name)
       .join(", ")}`;
     this.#root.html.appendChild(div);
+  }
+}
+
+@component("example-component")
+class ExampleComponent extends IsolatedCustomElement<{
+  htmlContent: { content: { mode: "single"; tag: "div" } };
+}> {
+  #count: { value: number } = { value: 0 };
+  // @lazy
+  // accessor count: { value: number } = { value: 0 };
+
+  adoptedStyles = [style];
+
+  update() {
+    if (this.#count.value % 2 === 0) {
+      this.root.innerHTML = `<div><div class="red">Count: ${
+        this.#count.value
+      }</div><slot name="content">Fallback</slot></div>`;
+    } else {
+      this.root.innerHTML = `<div><div>Count: ${this.#count.value}</div></div>`;
+    }
   }
 }

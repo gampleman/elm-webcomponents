@@ -8,6 +8,7 @@ describe.each([
   ["{foo: string}", "{ foo : String }"],
   ["number[]", "List (Float)"],
   ["{foo: number[]}[]", "List ({ foo : List (Float) })"],
+  ["{if: string}", "{ if_ : String }"],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `
