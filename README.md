@@ -1,14 +1,14 @@
 # Elm Webcomponents
 
-Webcomponents have become a standard technology for extending Elm on the client side.
+Web components have become a standard technology for extending Elm on the client side.
 However, there are a few pain points in implementing and maintaining proper interop, which this tool
 aims to solve.
 
-We provide a Typescript library that allows you to describe the desired interface (mostly through types)
+We provide a TypeScript library that allows you to describe the desired interface (mostly through types)
 that the provided CLI tool can than generate type safe Elm bindings for. This automates some of the
 tedium involved in building custom elements.
 
-Let's look at an example of a simple SizeObserver web component:
+Let's look at an example of a simple `SizeObserver` web component:
 
 ```typescript
 import { CustomElement, component, optional } from "elm-webcomponents";
@@ -52,7 +52,7 @@ class SizeObserver extends CustomElement<{
 }
 ```
 
-When you run this tool you will get the following file generated for you:
+When you run this tool, you will get the following file generated for you:
 
 ```elm
 module SizeObserver exposing (view, debounce)
@@ -106,7 +106,7 @@ Let's look at how this works:
 
 ### `@component`
 
-The first piece of the puzzle is the `@component` decorator. During run time, it's job is to register the class it's decorating as a custom element with a particular tag name. During code generation, we grab this tag name and use for our `Html.node` call.
+The first piece of the puzzle is the `@component` decorator. During runtime, its job is to register the class it's decorating as a custom element with a particular tag name. During code generation, we grab this tag name and use for our `Html.node` call.
 
 ### `@required` and `@optional`
 
@@ -164,7 +164,7 @@ class MyExample extends CustomElement<{}> {
 
 We recommend using the `accessor` keyword, since this opts into a nice reactive lifecycle of using the `update` function of the component.
 
-Broadly using the `accessor` is equivalent to:
+Using the `accessor` is broadly equivalent to:
 
 ```ts
 @component("my-example")
@@ -429,19 +429,19 @@ The `adoptedStyles` property is key, as this will efficiently allow every style 
 
 ## Compatibility
 
-### Typescript
+### TypeScript
 
-This library relies on the new decorators, so you \*_must not_ have `experimentalDecorators` enabled in your `tsconfing.json`. We recommend having `target: "es2015"` or later set as well.
+This library relies on the current experimental TypeScript implementation of the decorator syntax, so you \*_must not_ have `experimentalDecorators` enabled in your `tsconfing.json`. We recommend having `target: "es2015"` or later set as well.
 
 ### Web platform
 
-Most of the Webcomponent APIs are well supported cross browser. `adoptedStyles` relies on features that are slightly less prevalent, but still about 93% of web users as of writing. Some polyfills may be available.
+Most of the web component APIs are well supported cross browser. `adoptedStyles` relies on features that are slightly less prevalent, but still about 93% of web users as of writing. Some polyfills may be available.
 
-### Typescript -> Elm
+### TypeScript -> Elm
 
-This codebase works by translating a subset of Typescript types into Elm types/encoders/decoders.
+This codebase works by translating a subset of TypeScript types into Elm types/encoders/decoders.
 
-We don't currently support any form of encoding for Custom Types on the Elm side, meaning type Unions in type script won't work.
+We don't currently support any form of encoding for custom types on the Elm side, meaning type unions in TypeScript won't work.
 
 We plan to address this in the future. Some more advanced TS type shenanigans will also not work, such as Indexed types and similar. The best supported are things where there is a clear correspondence between Elm and TypeScript types.
 
