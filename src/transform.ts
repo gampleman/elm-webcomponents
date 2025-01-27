@@ -2,11 +2,13 @@ import { query, includes } from "@phenomnomnominal/tsquery";
 
 import * as ts from "typescript";
 import { buildEncoder } from "./elm/encoder";
-import { buildType } from "./elm/type";
+import { buildType, type Type as ElmType } from "./elm/type";
 import { buildDecoder } from "./elm/decoder";
 import { toValueCase, toTypeCase } from "./elm/utils";
 import fs from "node:fs";
 import path from "node:path";
+import { typeDef } from "cmd-ts/dist/cjs/type";
+import { handler, TransformError } from "./error";
 
 type HtmlContent =
   | "none"
@@ -31,10 +33,15 @@ function extractEventsFromTypeVar(
   return checker
     .getPropertiesOfType(checker.getTypeOfSymbol(prop))
     .map((prop) => {
+      const type = checker.getTypeOfSymbolAtLocation(
+        prop,
+        prop.valueDeclaration!
+      );
       return {
         name: prop.getName(),
         comment: ts.displayPartsToString(prop.getDocumentationComment(checker)),
-        type: checker.getTypeOfSymbolAtLocation(prop, prop.valueDeclaration!),
+        type,
+        elmType: buildType(type, checker, type.symbol.getDeclarations()![0]),
       };
     });
 }
@@ -242,27 +249,39 @@ export const transform = (
                 symbol.valueDeclaration!
               );
 
+              const targetNode = query(
+                propertyNode,
+                "TypeReference,SemicolonToken"
+              )[0];
+
               if (requiredDecorator) {
                 requiredAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  elmType: buildType(type, checker, targetNode),
                 });
               } else if (lazyDecorator) {
                 lazyAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  elmType: buildType(type, checker, targetNode),
                 });
               } else if (optionalDecorator) {
                 optionalAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  elmType: buildType(type, checker, targetNode),
                 });
               }
             }
           });
+
+          const getTypeDefs = (attrs: Attr[]) => {
+            return attrs.flatMap((attr) => [...attr.elmType.definitions]);
+          };
 
           return {
             viewFnName,
@@ -283,6 +302,13 @@ export const transform = (
               optionalAttributes.length > 0 ||
               events.optional.length > 0 ||
               extraAttributes,
+            typeDefs: new Map([
+              ...getTypeDefs(optionalAttributes),
+              ...getTypeDefs(requiredAttributes),
+              ...getTypeDefs(lazyAttributes),
+              ...getTypeDefs(events.required),
+              ...getTypeDefs(events.optional),
+            ]),
           };
         }
       });
@@ -305,14 +331,22 @@ export const main = ({
   inputFiles: string[];
   outputDir: string;
 }) => {
-  const program = ts.createProgram(inputFiles, {});
-  const output = transform(inputFiles, program);
-  [...output.entries()].forEach(([fileName, content]) => {
-    fs.writeFileSync(path.join(outputDir, fileName), content);
-  });
+  try {
+    const program = ts.createProgram(inputFiles, {});
+    const output = transform(inputFiles, program);
+    [...output.entries()].forEach(([fileName, content]) => {
+      fs.writeFileSync(path.join(outputDir, fileName), content);
+    });
+  } catch (e) {
+    if (e instanceof TransformError) {
+      handler(e);
+    } else {
+      throw e;
+    }
+  }
 };
 
-type Attr = { name: string; comment: string; type: ts.Type };
+type Attr = { name: string; comment: string; type: ts.Type; elmType: ElmType };
 
 type AttrList = { optional: Attr[]; required: Attr[] };
 
@@ -326,6 +360,7 @@ type OutputInfo = {
   checker: ts.TypeChecker;
   htmlContent: HtmlContent;
   attributesArg: boolean;
+  typeDefs: Map<string, string>;
 };
 
 const htmlContentToTypeSig = (htmlContent: HtmlContent): string => {
@@ -434,11 +469,13 @@ import Json.Encode as Encode
 import Json.Decode as Decode
 ${info.properties.lazy.length > 0 ? "import Html.Lazy" : ""}
 
+${Array.from(info.typeDefs.values()).join("\n\n")}
+
 ${info.properties.optional
   .map(
     (oa) =>
       `{-| ${oa.comment} -}
-${toValueCase(oa.name)} : ${buildType(oa.type, info.checker)} -> Attribute msg
+${toValueCase(oa.name)} : ${oa.elmType.expression} -> Attribute msg
 ${toValueCase(oa.name)} val = 
     Html.Attributes.property "${oa.name}" (${buildEncoder(
         oa.type,
@@ -453,10 +490,9 @@ ${info.events.optional
   .map(
     (oa) =>
       `{-| ${oa.comment} -}
-${toValueCase(`on ${oa.name}`)} : (${buildType(
-        oa.type,
-        info.checker
-      )} -> msg) -> Attribute msg
+${toValueCase(`on ${oa.name}`)} : (${
+        oa.elmType.expression
+      } -> msg) -> Attribute msg
 ${toValueCase(`on ${oa.name}`)} tagger = 
       Html.Events.on "${oa.name}" (Decode.map tagger (${buildDecoder(
         oa.type,
@@ -473,20 +509,13 @@ ${info.viewFnName} : ${info.attributesArg ? "List (Attribute msg) -> " : ""}${
           .map((ra) => {
             switch (ra.kind) {
               case "property":
-                return `${toValueCase(ra.name)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )}`;
+                return `${toValueCase(ra.name)} : ${ra.elmType.expression}`;
               case "lazy":
-                return `${toValueCase(ra.name)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )}`;
+                return `${toValueCase(ra.name)} : ${ra.elmType.expression}`;
               case "event":
-                return `${toValueCase(`on ${ra.name}`)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )} -> msg`;
+                return `${toValueCase(`on ${ra.name}`)} : ${
+                  ra.elmType.expression
+                } -> msg`;
               case "htmlContent":
                 return `${toValueCase(ra.name)} : ${
                   ra.mode == "list" ? "List" : ""
@@ -541,10 +570,7 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
 ${info.properties.lazy
   .map(
     (la) =>
-      `${toValueCase(la.name)}ValueSetter : ${buildType(
-        la.type,
-        info.checker
-      )} -> Html msg
+      `${toValueCase(la.name)}ValueSetter : ${la.elmType.expression} -> Html msg
 ${toValueCase(la.name)}ValueSetter val = 
   Html.node "ewc-value-setter" [ Html.Attributes.property "key" (Encode.string "${
     la.name

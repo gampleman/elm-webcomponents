@@ -84,10 +84,10 @@ class MyElement extends CustomElement<{
 
 type PlaceholderType = "slot" | "variable" | "context" | "system" | "local";
 
-interface Placeholder {
+interface Placeholder<Data> {
   name: string;
   type: string;
-  dataType: string;
+  dataType: Data;
 }
 
 type Root = {
@@ -99,13 +99,13 @@ export class ReactyThing extends CustomElement<{ extraAttributes: false }> {
   #root: Root;
 
   @required
-  accessor placeholders: Placeholder[];
+  accessor placeholders: Placeholder<string>[];
 
   @required
   accessor disabled: boolean;
 
   @lazy
-  accessor value: Placeholder | null;
+  accessor value: Placeholder<number> | null;
 
   init() {
     this.#root = {

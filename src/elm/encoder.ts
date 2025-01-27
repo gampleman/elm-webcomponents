@@ -69,7 +69,7 @@ export const buildEncoder = (
         .map(
           (prop) =>
             `( "${prop.getName()}", ${buildEncoder(
-              checker.getTypeAtLocation(prop.valueDeclaration),
+              checker.getTypeOfSymbol(prop),
               `${value}.${toValueCase(prop.getName())}`,
               checker
             )} )`

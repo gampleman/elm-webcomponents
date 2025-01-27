@@ -441,9 +441,11 @@ Most of the web component APIs are well supported cross browser. `adoptedStyles`
 
 This codebase works by translating a subset of TypeScript types into Elm types/encoders/decoders.
 
-We don't currently support any form of encoding for custom types on the Elm side, meaning type unions in TypeScript won't work.
+Some TypeScript objects can't meaningfully interop with Elm. Generally this means anything that isn't fundamentally composed of primitives, arrays and POJOs (Plain Old JavaScript Object). Think JSON data model. This means that _Classes_ are not supported, nor any built-in classes such as `RegExp` or `Date`, neither with any _Functions_ work, nor any more exotic objects such as `Float32Array` or `Promise`.
 
-We plan to address this in the future. Some more advanced TS type shenanigans will also not work, such as Indexed types and similar. The best supported are things where there is a clear correspondence between Elm and TypeScript types.
+This is a pretty fundamental limitation of how Elm works, so this is unlikely to change in the future. The following limitations are more temporary, due to implementation difficulty (but we intend to get these to work eventually, albeit perhaps with limitations of their own):
+
+We don't currently support any form of encoding for custom types on the Elm side, meaning type unions in TypeScript won't work.
 
 Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
 

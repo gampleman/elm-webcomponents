@@ -1,91 +1,225 @@
 import * as ts from "typescript";
-import { toValueCase } from "./utils";
+import { toTypeCase, toValueCase } from "./utils";
+import { TransformError } from "../error";
 
-export const buildType = (type: ts.Type, checker: ts.TypeChecker): string => {
-  const todo = (name: string) => {
-    console.warn(
-      `${name} : ${checker.typeToString(type)} is not implemented for types`
-    );
-    throw new Error(`${name} is not implemented for types`);
+export type Type = {
+  expression: string;
+  definitions: Map<string, string>;
+};
+
+const elm = (
+  strings: TemplateStringsArray,
+  ...values: (Type | string)[]
+): Type => {
+  let expression = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    let value = values[i];
+    if (typeof value === "string") {
+      expression += value;
+    } else {
+      expression += value.expression;
+    }
+
+    expression += strings[i + 1];
+  }
+  return {
+    expression,
+    definitions: new Map(
+      values.flatMap((v) =>
+        typeof v == "string" ? [] : Array.from(v.definitions?.entries())
+      )
+    ),
   };
-  // console.log("building type", checker.typeToString(type));
+};
+
+const join = (types: Type[], sep: string): Type => {
+  return elm`${types
+    .map((t, i) => {
+      if (i === 0) {
+        return t;
+      }
+      return elm`${sep}${t}`;
+    })
+    .reduce((acc, t) => elm`${acc}${t}`, elm``)}`;
+};
+
+const buildObjectDefinition = (
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  lastNode: ts.Node
+): Type => {
+  return elm`{ ${join(
+    checker.getPropertiesOfType(type).map((prop) => {
+      return elm`${toValueCase(prop.getName())} : ${buildType(
+        checker.getTypeAtLocation(prop.valueDeclaration),
+        checker,
+        lastNode
+      )}`;
+    }),
+    ", "
+  )} }`;
+};
+
+export const buildType = (
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  lastNode: ts.Node
+): Type => {
+  let node;
+  if (type.symbol && type.symbol.getDeclarations()?.[0]) {
+    node = type.symbol.getDeclarations()?.[0];
+  } else if (type.aliasSymbol && type.aliasSymbol.getDeclarations()?.[0]) {
+    node = type.aliasSymbol.getDeclarations()?.[0];
+  } else {
+    node = lastNode;
+  }
+
+  const error = (message: string) => {
+    throw new TransformError(node, message);
+  };
+
+  const todo = (name: string) => error(`Type ${name} not implemented`);
 
   switch (type.flags) {
     case ts.TypeFlags.Any:
-      throw new Error("Any type not supported");
+      error("Any type not supported");
     case ts.TypeFlags.Unknown:
-      throw new Error(
-        "The type was Unknown, but we need to know the type to infer an encoder"
+      error(
+        "The type was Unknown, but we need to know the type to infer the Elm type"
       );
     case ts.TypeFlags.String:
-      return `String`;
+      return elm`String`;
     case ts.TypeFlags.Number:
-      return `Float`;
+      return elm`Float`;
     case ts.TypeFlags.Boolean:
     case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
-      return `Bool`;
+      return elm`Bool`;
     case ts.TypeFlags.Enum:
       return todo("Enum");
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
-      throw new Error("BigInt type not supported");
+      error("BigInt type not supported");
     case ts.TypeFlags.StringLiteral:
       // TODO: Implement string encoder
-      return `String`;
+      return elm`String`;
 
     case ts.TypeFlags.NumberLiteral:
       // TODO: Implement NumberLiteral
-      return `Float`;
+      return elm`Float`;
 
     case ts.TypeFlags.BooleanLiteral:
       // TODO: Implement BooleanLiteral
-      return `Bool`;
+      return elm`Bool`;
 
     case ts.TypeFlags.ESSymbol:
     case ts.TypeFlags.UniqueESSymbol:
-      throw new Error("Symbol type not supported");
+      error("Symbol type not supported");
 
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
     case ts.TypeFlags.Never:
-      throw new Error("Emtpy/void types not supported");
+      error("Emtpy/void types not supported");
 
     case ts.TypeFlags.TypeParameter:
-      return todo("TypeParameter");
+      return elm`${toValueCase(type.symbol.name)}`;
     case ts.TypeFlags.Object:
       if (checker.isArrayType(type)) {
-        return `List (${buildType(
+        return elm`List (${buildType(
           checker.getTypeArguments(type as ts.TypeReference)[0],
-          checker
+          checker,
+          node
         )})`;
       }
-      // switch ((type as ts.ObjectType).objectFlags) {
-      //   case ts.ObjectFlags.Reference:
-      //     const t = type as ts.TypeReference;
-      //     console.log(
-      //       "target",
-      //       checker.typeToString(t.target),
-      //       (t.target as ts.TypeReference).node
-      //     );
 
-      //     console.log("node", t.node);
-      //     break;
-      //   case ts.ObjectFlags.ArrayLiteral:
-      //     console.log("isArrray");
-      // }
-      return `{ ${checker
-        .getPropertiesOfType(type)
-        .map((prop) => {
-          // console.log("prop", prop.getName(), prop);
-          // console.log(checker.getTypeAtLocation(prop.valueDeclaration));
-          return `${toValueCase(prop.getName())} : ${buildType(
-            checker.getTypeAtLocation(prop.valueDeclaration),
-            checker
+      console.log(
+        "target",
+        checker.typeToString(type),
+        (type as ts.ObjectType).objectFlags,
+        type.aliasSymbol
+      );
+      if (type.aliasSymbol) {
+        // let refType = checker.getSignaturesOfType(type, ts.SignatureKind.);
+        // let refType = checker.getTypeAtLocation(
+        //   (type.aliasSymbol.declarations?.[0] as ts.TypeAliasDeclaration).type!
+        // );
+        console.log(type.aliasSymbol);
+        const args =
+          type.aliasTypeArguments?.map((arg) =>
+            buildType(arg, checker, node)
+          ) ?? [];
+        console.log(
+          "declared",
+          checker.getDeclaredTypeOfSymbol(type.aliasSymbol)
+        );
+        let refType = checker.getDeclaredTypeOfSymbol(type.aliasSymbol);
+        // return;
+        // console.log("refType", refType);
+        let ref = elm`type alias ${toTypeCase(type.aliasSymbol.name)}${
+          refType.aliasTypeArguments == null
+            ? ""
+            : " " +
+              refType.aliasTypeArguments
+                .map((arg): string => toValueCase(arg.symbol.name))
+                .join(" ")
+        } = ${buildObjectDefinition(refType, checker, node)}`;
+
+        let begin = {
+          expression: toTypeCase(type.aliasSymbol.name),
+          definitions: new Map([
+            [type.aliasSymbol.name, ref.expression],
+            ...ref.definitions.entries(),
+          ]),
+        };
+
+        return join([begin, ...args], " ");
+      }
+
+      let ref;
+      switch ((type as ts.ObjectType).objectFlags) {
+        case ts.ObjectFlags.Interface:
+          ref = elm`type alias ${type.symbol.name} = ${buildObjectDefinition(
+            type,
+            checker,
+            node
           )}`;
-        })
-        .join(", ")} }`;
+          return {
+            expression: type.symbol.name,
+            definitions: new Map([
+              [type.symbol.name, ref.expression],
+              ...ref.definitions,
+            ]),
+          };
+        case ts.ObjectFlags.Reference:
+          const t = type as ts.TypeReference;
+          const args =
+            t.typeArguments?.map((arg) => buildType(arg, checker, node)) ?? [];
+
+          console.log(args);
+
+          ref = elm`type alias ${toTypeCase(t.target.symbol.name)}${
+            t.target.typeArguments == null
+              ? ""
+              : " " +
+                t.target.typeArguments
+                  .map((arg): string => toValueCase(arg.symbol.name))
+                  .join(" ")
+          } = ${buildObjectDefinition(t.target, checker, node)}`;
+
+          let begin = {
+            expression: toTypeCase(t.symbol.name),
+            definitions: new Map([
+              [t.target.symbol.name, ref.expression],
+              ...ref.definitions.entries(),
+            ]),
+          };
+
+          return join([begin, ...args], " ");
+        case ts.ObjectFlags.ArrayLiteral:
+          console.log("isArrray");
+      }
+      return buildObjectDefinition(type, checker, node);
 
     case ts.TypeFlags.Union:
       return todo("Union");
