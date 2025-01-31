@@ -4,7 +4,7 @@ import * as ts from "typescript";
 import { buildEncoder } from "./elm/encoder";
 import { buildType, type Type as ElmType } from "./elm/type";
 import { buildDecoder } from "./elm/decoder";
-import { toValueCase, toTypeCase } from "./elm/utils";
+import { toValueCase, toTypeCase, buildScope } from "./elm/utils";
 import fs from "node:fs";
 import path from "node:path";
 import { typeDef } from "cmd-ts/dist/cjs/type";
@@ -41,7 +41,7 @@ function extractEventsFromTypeVar(
         name: prop.getName(),
         comment: ts.displayPartsToString(prop.getDocumentationComment(checker)),
         type,
-        elmType: buildType(type, checker, type.symbol.getDeclarations()![0]),
+        elmType: buildType(type, checker, prop.getDeclarations()![0]),
       };
     });
 }
@@ -331,19 +331,19 @@ export const main = ({
   inputFiles: string[];
   outputDir: string;
 }) => {
-  try {
-    const program = ts.createProgram(inputFiles, {});
-    const output = transform(inputFiles, program);
-    [...output.entries()].forEach(([fileName, content]) => {
+  const program = ts.createProgram(inputFiles, {});
+  const output = transform(inputFiles, program);
+  [...output.entries()].forEach(([fileName, content]) => {
+    try {
       fs.writeFileSync(path.join(outputDir, fileName), content);
-    });
-  } catch (e) {
-    if (e instanceof TransformError) {
-      handler(e);
-    } else {
-      throw e;
+    } catch (e) {
+      if (e instanceof TransformError) {
+        handler(e);
+      } else {
+        throw e;
+      }
     }
-  }
+  });
 };
 
 type Attr = { name: string; comment: string; type: ts.Type; elmType: ElmType };
@@ -455,6 +455,19 @@ const formatElmFile = (info: OutputInfo) => {
 
   const requiredArgs = getRequiredArgs(info);
 
+  // this constructs a list of all the names in the module scope and/or the name of one of the main arguments
+  const scopeNames = [
+    ...info.properties.optional.map((oa) => toValueCase(oa.name)),
+    ...info.events.optional.map((oa) => toValueCase(`on ${oa.name}`)),
+    info.viewFnName,
+    ...(info.attributesArg ? ["attrs"] : []),
+    ...(requiredArgs.length > 0 ? ["req"] : []),
+    ...(info.htmlContent == "list" ? ["children"] : ["child"]),
+    ...info.properties.lazy.map((la) => toValueCase(la.name) + "ValueSetter"),
+    "tagger",
+  ];
+  const scope = buildScope(scopeNames);
+
   return `module ${info.moduleName} exposing (${exposing.join(", ")})
 
 {-| ${info.moduleComments}
@@ -480,7 +493,8 @@ ${toValueCase(oa.name)} val =
     Html.Attributes.property "${oa.name}" (${buildEncoder(
         oa.type,
         "val",
-        info.checker
+        info.checker,
+        scope
       )})
 `
   )
@@ -496,7 +510,8 @@ ${toValueCase(`on ${oa.name}`)} : (${
 ${toValueCase(`on ${oa.name}`)} tagger = 
       Html.Events.on "${oa.name}" (Decode.map tagger (${buildDecoder(
         oa.type,
-        info.checker
+        info.checker,
+        scope
       )}))
   `
   )
@@ -540,7 +555,8 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
         `Html.Attributes.property "${ra.name}" (${buildEncoder(
           ra.type,
           `req.${toValueCase(ra.name)}`,
-          info.checker
+          info.checker,
+          scope
         )})`
     )
     .concat(
@@ -548,7 +564,7 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
         (re) =>
           `Html.Events.on "${re.name}" (Decode.map req.${toValueCase(
             `on ${re.name}`
-          )} (${buildDecoder(re.type, info.checker)}))
+          )} (${buildDecoder(re.type, info.checker, scope)}))
       `
       )
     )
@@ -577,7 +593,8 @@ ${toValueCase(la.name)}ValueSetter val =
   }"), Html.Attributes.property "value" (${buildEncoder(
         la.type,
         "val",
-        info.checker
+        info.checker,
+        scope
       )})] []
 `
   )

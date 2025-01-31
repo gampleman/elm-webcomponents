@@ -445,7 +445,58 @@ Some TypeScript objects can't meaningfully interop with Elm. Generally this mean
 
 This is a pretty fundamental limitation of how Elm works, so this is unlikely to change in the future. The following limitations are more temporary, due to implementation difficulty (but we intend to get these to work eventually, albeit perhaps with limitations of their own):
 
-We don't currently support any form of encoding for custom types on the Elm side, meaning type unions in TypeScript won't work.
+Union types are supported with the following limitations:
+
+- They must be declared inside a `type` alias; anonymous unions are not supported (as we'd need a name for them in Elm).
+
+  Therefore the following won't work:
+
+  ```ts
+  type shape = {
+    name: string;
+    kind: "square" | "triangle";
+  };
+  ```
+
+  but the following will:
+
+  ```ts
+  type shape =
+    | {
+        name: string;
+        kind: "square";
+      }
+    | {
+        name: string;
+        kind: "triangle";
+      };
+  ```
+
+  even though in some sense they are the identical type in TS and will generate in Elm:
+
+  ```elm
+  type Shape
+      = Square { name : String }
+      | Triangle { name : String }
+  ```
+
+- Each member of the union must be either a _string literal type_ or an object type with exactly one string literal property.
+
+  Therefore,
+
+  ```ts
+  type Color = "red" | "green" | "blue" | { tag: "Custom"; rgb: string };
+  ```
+
+  will work, but
+
+  ```ts
+  type Broken = 3 | { tag: "foo"; type: "foo" } | string;
+  ```
+
+  won't.
+
+Intersection types are supported in an experimental and rudimentary way. Best avoided, but they may work.
 
 Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
 

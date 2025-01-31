@@ -86,26 +86,42 @@ type PlaceholderType = "slot" | "variable" | "context" | "system" | "local";
 
 interface Placeholder<Data> {
   name: string;
-  type: string;
+  type: PlaceholderType;
   dataType: Data;
 }
+
+type Value =
+  | {
+      type: "string_value";
+      value: string;
+    }
+  | { type: "int_value"; value: number };
 
 type Root = {
   html: HTMLElement;
 };
 
 @component("reacty-thing")
-export class ReactyThing extends CustomElement<{ extraAttributes: false }> {
+export class ReactyThing extends CustomElement<{
+  extraAttributes: false;
+  requiredEvents: { click: Value; change: Placeholder<string>[] };
+}> {
   #root: Root;
 
   @required
   accessor placeholders: Placeholder<string>[];
 
   @required
-  accessor disabled: boolean;
+  accessor disabled: Value;
+
+  @optional
+  accessor el: Placeholder<number> | null;
 
   @lazy
   accessor value: Placeholder<number> | null;
+
+  @required
+  accessor test: { foo: string } & { bar: number };
 
   init() {
     this.#root = {

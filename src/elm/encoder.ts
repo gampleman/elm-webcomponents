@@ -1,5 +1,5 @@
 import * as ts from "typescript";
-import { toValueCase } from "./utils";
+import { toValueCase, toTypeCase, introduce } from "./utils";
 
 const todo = (name: string) => {
   console.warn(`${name} is not implemented for encoders`);
@@ -9,8 +9,10 @@ const todo = (name: string) => {
 export const buildEncoder = (
   type: ts.Type,
   value: string,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
+  scope: Map<string, number>
 ): string => {
+  let variable, newScope;
   switch (type.flags) {
     case ts.TypeFlags.Any:
       throw new Error("Any type not supported");
@@ -32,12 +34,10 @@ export const buildEncoder = (
     case ts.TypeFlags.BigIntLiteral:
       throw new Error("BigInt type not supported");
     case ts.TypeFlags.StringLiteral:
-      // TODO: Implement string encoder
-      return `Encode.string ${value}`;
+      return `Encode.string "${type.isStringLiteral() && type.value}"`;
 
     case ts.TypeFlags.NumberLiteral:
-      // TODO: Implement NumberLiteral
-      return `Encode.float ${value}`;
+      return `Encode.float ${type.isNumberLiteral() && type.value}`;
 
     case ts.TypeFlags.BooleanLiteral:
       // TODO: Implement BooleanLiteral
@@ -57,10 +57,13 @@ export const buildEncoder = (
       return todo("TypeParameter");
     case ts.TypeFlags.Object:
       if (checker.isArrayType(type)) {
-        return `Encode.list (\\el -> ${buildEncoder(
+        [variable, newScope] = introduce("el", scope);
+        console.log("variable", variable, newScope);
+        return `Encode.list (\\${variable} -> ${buildEncoder(
           checker.getTypeArguments(type as ts.TypeReference)[0],
-          "el",
-          checker
+          variable,
+          checker,
+          newScope
         )}) ${value}`;
       }
 
@@ -71,17 +74,58 @@ export const buildEncoder = (
             `( "${prop.getName()}", ${buildEncoder(
               checker.getTypeOfSymbol(prop),
               `${value}.${toValueCase(prop.getName())}`,
-              checker
+              checker,
+              scope
             )} )`
         )
         .join("\n    , ")}]`;
 
     case ts.TypeFlags.Union:
-      return todo("Union");
+      let refType = checker.getDeclaredTypeOfSymbol(
+        type.aliasSymbol
+      ) as ts.UnionType;
+      return `case (${value}) of
+        ${refType.types
+          .map((t) => {
+            if (t.isStringLiteral()) {
+              return `${toTypeCase(t.value)} -> ${buildEncoder(
+                t,
+                value,
+                checker,
+                scope
+              )}`;
+            } else {
+              let prop = t
+                .getProperties()
+                .map((sym) =>
+                  checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+                )
+                .find((ts) => ts.isStringLiteral())?.value;
+              [variable, newScope] = introduce(toValueCase(prop), scope);
 
-    // case ts.TypeFlags.Intersection:
-    //   // TODO: ???
-    //   return `Debug.todo`;
+              return `${toTypeCase(prop)} ${variable} -> ${buildEncoder(
+                t,
+                variable,
+                checker,
+                newScope
+              )}`;
+            }
+          })
+          .join("\n        ")}`;
+
+    case ts.TypeFlags.Intersection:
+      return `Encode.object [ ${checker
+        .getPropertiesOfType(type)
+        .map(
+          (prop) =>
+            `( "${prop.getName()}", ${buildEncoder(
+              checker.getTypeOfSymbol(prop),
+              `${value}.${toValueCase(prop.getName())}`,
+              checker,
+              scope
+            )} )`
+        )
+        .join("\n    , ")}]`;
 
     // case ts.TypeFlags.Index:
     //   // TODO: ???

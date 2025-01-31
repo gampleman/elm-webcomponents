@@ -1,15 +1,18 @@
-import { buildType } from "./type";
+import { buildEncoder } from "./encoder";
 import * as ts from "typescript";
 import { query } from "@phenomnomnominal/tsquery";
 
 describe.each([
-  ["string", "String"],
-  ["number", "Float"],
-  ["boolean", "Bool"],
-  ["{foo: string}", "{ foo : String }"],
-  ["number[]", "List (Float)"],
-  ["{foo: number[]}[]", "List ({ foo : List (Float) })"],
-  ["{if: string}", "{ if_ : String }"],
+  ["string", "Encode.string value"],
+  ["number", "Encode.float value"],
+  ["boolean", "Encode.bool value"],
+  ["{foo: string}", `Encode.object [ ( "foo", Encode.string value.foo )]`],
+  ["number[]", "Encode.list (\\el -> Encode.float el) value"],
+  [
+    "{foo: number[]}[]",
+    `Encode.list (\\el -> Encode.object [ ( "foo", Encode.list (\\el1 -> Encode.float el1) el.foo )]) value`,
+  ],
+  ["{if: string}", `Encode.object [ ( "if", Encode.string value.if_ )]`],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `
@@ -32,7 +35,7 @@ describe.each([
         (stmt as ts.VariableDeclaration).type!
       );
 
-      expect(buildType(type, checker, stmt).expression).toEqual(elmType);
+      expect(buildEncoder(type, "value", checker, new Map())).toEqual(elmType);
     });
     expect.assertions(1);
   });
@@ -42,58 +45,59 @@ describe.each([
   [
     "type Foo = {foo: string}",
     "Foo",
-    new Map([["Foo", "type alias Foo = { foo : String }"]]),
-    "Foo",
+    `Encode.object [ ( "foo", Encode.string value.foo )]`,
   ],
-  // [
-  //   "type Foo = {foo?: string}",
-  //   "Foo",
-  //   new Map([["Foo", "type alias Foo = { foo : Maybe String }"]]),
-  //   "Foo",
-  // ],
+  [
+    "type Foo = {foo?: string}",
+    "Foo",
+    `Encode.object [ ( "foo", case value.foo of 
+        Just string -> Encode.string string 
+        Nothing -> Encode.null 
+        )]`,
+  ],
   [
     "type Foo<P> = {foo: P}",
     "Foo<number>",
-    new Map([["Foo", "type alias Foo p = { foo : p }"]]),
-    "Foo Float",
+    `Encode.object [ ( "foo", Encode.float value.foo )]`,
   ],
   [
     "interface Foo {foo: string}",
     "Foo",
-    new Map([["Foo", "type alias Foo = { foo : String }"]]),
-    "Foo",
+    `Encode.object [ ( "foo", Encode.string value.foo )]`,
   ],
   [
     "interface foo<P> {foo: P}",
     "foo<number>",
-    new Map([["foo", "type alias Foo p = { foo : p }"]]),
-    "Foo Float",
+    `Encode.object [ ( "foo", Encode.float value.foo )]`,
   ],
   [
     "interface foo<P> {foo: P}",
     "foo<number>[]",
-    new Map([["foo", "type alias Foo p = { foo : p }"]]),
-    "List (Foo Float)",
+    `Encode.list (\\el -> Encode.object [ ( "foo", Encode.float el.foo )]) value`,
   ],
   [
     `type Foo = "bar" | "baz"`,
     "Foo",
-    new Map([["Foo", "type Foo = Bar | Baz"]]),
-    "Foo",
+    `case (value) of
+        Bar -> Encode.string "bar"
+        Baz -> Encode.string "baz"`,
   ],
   [
     `type Foo = "bar" | { tag: "baz", value: number }`,
     "Foo",
-    new Map([["Foo", "type Foo = Bar | Baz ({ value : Float })"]]),
-    "Foo",
+    `case (value) of
+        Bar -> Encode.string "bar"
+        Baz baz -> Encode.object [ ( "tag", Encode.string "baz" )
+    , ( "value", Encode.float baz.value )]`,
   ],
   [
     `type Foo = { tag: 'foo', value: number } & { name : string }`,
     "Foo",
-    new Map(),
-    "{ tag : String, value : Float, name : String }",
+    `Encode.object [ ( "tag", Encode.string "foo" )
+    , ( "value", Encode.float value.value )
+    , ( "name", Encode.string value.name )]`,
   ],
-])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeDef, elmTypeRef) => {
+])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {
     const source = `
     ${tsTypeDef};
@@ -116,10 +120,9 @@ describe.each([
       const type = checker.getTypeAtLocation(
         (stmt as ts.VariableDeclaration).type!
       );
-      const elmType = buildType(type, checker, stmt);
-      expect(elmType.expression).toEqual(elmTypeRef);
-      expect(elmType.definitions).toEqual(elmTypeDef);
+      const elmType = buildEncoder(type, "value", checker, new Map());
+      expect(elmType).toEqual(elmTypeRef);
     });
-    expect.assertions(2);
+    expect.assertions(1);
   });
 });

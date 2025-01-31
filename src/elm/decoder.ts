@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+import { toValueCase, toTypeCase, introduce } from "./utils";
 
 const todo = (name: string) => {
   console.warn(`${name} is not implemented for decoders`);
@@ -7,8 +8,15 @@ const todo = (name: string) => {
 
 export const buildDecoder = (
   type: ts.Type,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
+  scope: Map<string, number>,
+  omitLiterals = false
 ): string => {
+  let variable: string, newScope: Map<string, number>;
+  //reusable variable declarations
+  let properties: ts.Symbol[];
+  let propNames: string[];
+
   switch (type.flags) {
     case ts.TypeFlags.Any:
       throw new Error("Any type not supported");
@@ -21,6 +29,7 @@ export const buildDecoder = (
     case ts.TypeFlags.Number:
       return `Decode.float`;
     case ts.TypeFlags.Boolean:
+    case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
       return `Decode.bool`;
     case ts.TypeFlags.Enum:
       return todo("Enum");
@@ -29,8 +38,9 @@ export const buildDecoder = (
     case ts.TypeFlags.BigIntLiteral:
       throw new Error("BigInt type not supported");
     case ts.TypeFlags.StringLiteral:
-      // TODO: Implement string encoder
-      return `Decode.string`;
+      [variable, newScope] = introduce("str", scope);
+      let t = type as ts.StringLiteralType;
+      return `Decode.string |> Decode.andThen (\\${variable} -> if ${variable} == "${t.value}" then Decode.succeed ${variable} else Decode.fail "Expected ${t.value}")`;
 
     case ts.TypeFlags.NumberLiteral:
       // TODO: Implement NumberLiteral
@@ -53,27 +63,97 @@ export const buildDecoder = (
     case ts.TypeFlags.TypeParameter:
       return todo("TypeParameter");
     case ts.TypeFlags.Object:
-      const properties = checker.getPropertiesOfType(type);
-      const propNames = properties.map((prop) => prop.getName());
+      if (checker.isArrayType(type)) {
+        return `Decode.list (${buildDecoder(
+          checker.getTypeArguments(type as ts.TypeReference)[0],
+          checker,
+          scope
+        )})`;
+      }
+      properties = checker.getPropertiesOfType(type);
+      let propies;
+      [propies, newScope] = properties.reduce<
+        [[string, string][], Map<string, number>]
+      >(
+        ([vals, scope], prop) => {
+          if (
+            !omitLiterals ||
+            !checker.getTypeOfSymbol(prop).isStringLiteral()
+          ) {
+            let name = toValueCase(prop.getName());
+            let [newName, newScope] = introduce(name, scope);
+            return [[...vals, [name, newName]], newScope];
+          } else {
+            return [[...vals, [toValueCase(prop.getName()), "_"]], scope];
+          }
+        },
+        [[], scope]
+      );
+
+      return `Decode.succeed (\\${propies
+        .map((p) => p[1])
+        .join(" ")} -> { ${propies
+        .filter((p) => p[1] !== "_")
+        .map((p) => `${p[0]} = ${p[1]}`)
+        .join(", ")} })
+      ${properties
+        .map(
+          (prop) =>
+            `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" (${buildDecoder(
+              checker.getTypeOfSymbol(prop),
+              checker,
+              newScope
+            )}))`
+        )
+        .join("\n      ")}`;
+
+    case ts.TypeFlags.Union:
+      let refType = checker.getDeclaredTypeOfSymbol(
+        type.aliasSymbol
+      ) as ts.UnionType;
+      return `Decode.oneOf [${refType.types
+        .map((t) => {
+          if (t.isStringLiteral()) {
+            return `Decode.map (always ${toTypeCase(t.value)})  (${buildDecoder(
+              t,
+              checker,
+              scope
+            )})`;
+          } else {
+            let prop = t
+              .getProperties()
+              .map((sym) =>
+                checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+              )
+              .find((ts) => ts.isStringLiteral())?.value;
+
+            return `Decode.map ${toTypeCase(prop)} (${buildDecoder(
+              t,
+              checker,
+              scope,
+              true
+            )})`;
+          }
+        })
+        .join(", ")}]`;
+
+    case ts.TypeFlags.Intersection:
+      properties = checker.getPropertiesOfType(type);
+      propNames = properties.map((prop) => toValueCase(prop.getName()));
+
       return `Decode.succeed (\\${propNames.join(" ")} -> { ${propNames
         .map((prop) => `${prop} = ${prop}`)
         .join(", ")} })
       ${properties
         .map(
           (prop) =>
-            `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" ${buildDecoder(
+            `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" (${buildDecoder(
               checker.getTypeOfSymbol(prop),
-              checker
-            )})`
+              checker,
+              scope
+            )}))`
         )
         .join("\n      ")}`;
-
-    case ts.TypeFlags.Union:
-      return todo("Union");
-
-    // case ts.TypeFlags.Intersection:
-    //   // TODO: ???
-    //   return `Debug.todo`;
 
     // case ts.TypeFlags.Index:
     //   // TODO: ???

@@ -46,16 +46,25 @@ const join = (types: Type[], sep: string): Type => {
 const buildObjectDefinition = (
   type: ts.Type,
   checker: ts.TypeChecker,
-  lastNode: ts.Node
+  lastNode: ts.Node,
+  filterOutLiterals: boolean
 ): Type => {
   return elm`{ ${join(
-    checker.getPropertiesOfType(type).map((prop) => {
-      return elm`${toValueCase(prop.getName())} : ${buildType(
-        checker.getTypeAtLocation(prop.valueDeclaration),
-        checker,
-        lastNode
-      )}`;
-    }),
+    checker
+      .getPropertiesOfType(type)
+      .filter(
+        (prop) =>
+          !filterOutLiterals ||
+          !checker.getTypeAtLocation(prop.valueDeclaration).isStringLiteral()
+      )
+      .map((prop) => {
+        return elm`${toValueCase(prop.getName())} : ${buildType(
+          checker.getTypeAtLocation(prop.valueDeclaration),
+          checker,
+          lastNode,
+          false
+        )}`;
+      }),
     ", "
   )} }`;
 };
@@ -63,7 +72,8 @@ const buildObjectDefinition = (
 export const buildType = (
   type: ts.Type,
   checker: ts.TypeChecker,
-  lastNode: ts.Node
+  lastNode: ts.Node,
+  filterOutLiterals = false
 ): Type => {
   let node;
   if (type.symbol && type.symbol.getDeclarations()?.[0]) {
@@ -132,7 +142,6 @@ export const buildType = (
           node
         )})`;
       }
-
       console.log(
         "target",
         checker.typeToString(type),
@@ -163,7 +172,12 @@ export const buildType = (
               refType.aliasTypeArguments
                 .map((arg): string => toValueCase(arg.symbol.name))
                 .join(" ")
-        } = ${buildObjectDefinition(refType, checker, node)}`;
+        } = ${buildObjectDefinition(
+          refType,
+          checker,
+          node,
+          filterOutLiterals
+        )}`;
 
         let begin = {
           expression: toTypeCase(type.aliasSymbol.name),
@@ -182,7 +196,8 @@ export const buildType = (
           ref = elm`type alias ${type.symbol.name} = ${buildObjectDefinition(
             type,
             checker,
-            node
+            node,
+            filterOutLiterals
           )}`;
           return {
             expression: type.symbol.name,
@@ -205,7 +220,12 @@ export const buildType = (
                 t.target.typeArguments
                   .map((arg): string => toValueCase(arg.symbol.name))
                   .join(" ")
-          } = ${buildObjectDefinition(t.target, checker, node)}`;
+          } = ${buildObjectDefinition(
+            t.target,
+            checker,
+            node,
+            filterOutLiterals
+          )}`;
 
           let begin = {
             expression: toTypeCase(t.symbol.name),
@@ -219,14 +239,56 @@ export const buildType = (
         case ts.ObjectFlags.ArrayLiteral:
           console.log("isArrray");
       }
-      return buildObjectDefinition(type, checker, node);
+      return buildObjectDefinition(type, checker, node, filterOutLiterals);
 
     case ts.TypeFlags.Union:
-      return todo("Union");
+      if (type.aliasSymbol) {
+        let refType = checker.getDeclaredTypeOfSymbol(
+          type.aliasSymbol
+        ) as ts.UnionType;
 
-    // case ts.TypeFlags.Intersection:
-    //   // TODO: ???
-    //   return `Debug.todo`;
+        if (
+          refType.types.every(
+            (t) =>
+              t.isStringLiteral() ||
+              t
+                .getProperties()
+                .some((sym) =>
+                  checker
+                    .getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+                    .isStringLiteral()
+                )
+          )
+        ) {
+          let ref = elm`type ${toTypeCase(type.aliasSymbol.name)} = ${join(
+            refType.types.map((t) => {
+              if (t.isStringLiteral()) {
+                return elm`${toTypeCase(t.value)}`;
+              }
+              return elm`${toTypeCase(
+                t
+                  .getProperties()
+                  .map((sym) =>
+                    checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+                  )
+                  .find((ts) => ts.isStringLiteral())?.value
+              )} (${buildType(t, checker, node, true)})`;
+            }),
+            " | "
+          )}`;
+          return {
+            expression: toTypeCase(type.aliasSymbol.name),
+            definitions: new Map([
+              [type.aliasSymbol.name, ref.expression],
+              ...ref.definitions,
+            ]),
+          };
+        } else
+          error(`${checker.typeToString(type)} is not a supported Union type`);
+      } else error("Anonymous union types not supported");
+
+    case ts.TypeFlags.Intersection:
+      return buildObjectDefinition(type, checker, node, false);
 
     // case ts.TypeFlags.Index:
     //   // TODO: ???
@@ -260,7 +322,7 @@ export const buildType = (
     //   return `Debug.todo`;
 
     default:
-      throw new Error(
+      error(
         `Advanced types not supported (${type.flags}): ${checker.typeToString(
           type
         )}`
