@@ -127,16 +127,16 @@ export const component =
     window.customElements.define(tagName, decorated);
   };
 
-function decorator<V>(
+function decorator<T, V>(
   access: any,
   context:
-    | ClassAccessorDecoratorContext<CustomElement, V>
-    | ClassSetterDecoratorContext<CustomElement, V>
-    | ClassFieldDecoratorContext<CustomElement, V>
+    | ClassAccessorDecoratorContext<CustomElement<T>, V>
+    | ClassSetterDecoratorContext<CustomElement<T>, V>
+    | ClassFieldDecoratorContext<CustomElement<T>, V>
 ): any {
   if (context.kind === "accessor") {
     return {
-      set(this: CustomElement, value: V) {
+      set(this: CustomElement<T>, value: V) {
         context.access.set.call(this, value);
         this.scheduleUpdate?.();
       },
@@ -169,9 +169,9 @@ export const required = decorator;
  *
  * @param options.updateAfterSet If set to false, the `update` method will not be called after the value is set.
  */
-export let lazy = <V>(
-  ...args: Parameters<typeof decorator<V>>
-): ReturnType<typeof decorator<V>> => {
+export let lazy = <T, V>(
+  ...args: Parameters<typeof decorator<T, V>>
+): ReturnType<typeof decorator<T, V>> => {
   lazy = decorator;
   if (!window.customElements.get("ewc-value-setter")) {
     window.customElements.define(
