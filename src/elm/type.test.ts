@@ -40,9 +40,24 @@ describe.each([
 
 describe.each([
   [
-    "type Foo = {foo: string}",
-    "Foo",
+    "type foo = {foo: string}",
+    "foo",
     new Map([["Foo", "type alias Foo = { foo : String }"]]),
+    "Foo",
+  ],
+  [
+    `/**
+  * Some comment
+  */
+type Foo = {foo: string}`,
+    "Foo",
+    new Map([
+      [
+        "Foo",
+        `{-| Some comment -}
+type alias Foo = { foo : String }`,
+      ],
+    ]),
     "Foo",
   ],
   [
@@ -64,27 +79,33 @@ describe.each([
     "Foo",
   ],
   [
+    "/**\n * Docs\n */\ninterface Foo {foo: string}",
+    "Foo",
+    new Map([["Foo", "{-| Docs -}\ntype alias Foo = { foo : String }"]]),
+    "Foo",
+  ],
+  [
     "interface foo<P> {foo: P}",
     "foo<number>",
-    new Map([["foo", "type alias Foo p = { foo : p }"]]),
+    new Map([["Foo", "type alias Foo p = { foo : p }"]]),
     "Foo Float",
   ],
   [
     "interface foo<P> {foo: P}",
     "foo<number>[]",
-    new Map([["foo", "type alias Foo p = { foo : p }"]]),
+    new Map([["Foo", "type alias Foo p = { foo : p }"]]),
     "List (Foo Float)",
   ],
   [
-    `type Foo = "bar" | "baz"`,
-    "Foo",
-    new Map([["Foo", "type Foo = Bar | Baz"]]),
+    `type foo = "bar" | "baz"`,
+    "foo",
+    new Map([["Foo(..)", "type Foo = Bar | Baz"]]),
     "Foo",
   ],
   [
     `type Foo = "bar" | { tag: "baz", value: number }`,
     "Foo",
-    new Map([["Foo", "type Foo = Bar | Baz ({ value : Float })"]]),
+    new Map([["Foo(..)", "type Foo = Bar | Baz ({ value : Float })"]]),
     "Foo",
   ],
   [

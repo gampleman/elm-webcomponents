@@ -178,7 +178,6 @@ export const transform = (
               );
               if (extraAttributesProp != null) {
                 const t = checker.getTypeOfSymbol(extraAttributesProp);
-                console.log("extraAttributes", checker.typeToString(t));
                 if (checker.typeToString(t) == "false") {
                   extraAttributes = false;
                 }
@@ -314,8 +313,6 @@ export const transform = (
       });
     })
     .filter((x) => x != null) as OutputInfo[];
-
-  console.log(outputInfos);
 
   const output = new Map<string, string>();
   outputInfos.forEach((info) => {
@@ -453,6 +450,7 @@ const formatElmFile = (info: OutputInfo) => {
     ...info.events.optional.map((oa) => toValueCase(`on ${oa.name}`))
   );
 
+  exposing.push(...info.typeDefs.keys());
   const requiredArgs = getRequiredArgs(info);
 
   // this constructs a list of all the names in the module scope and/or the name of one of the main arguments

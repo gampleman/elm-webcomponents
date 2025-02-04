@@ -69,6 +69,21 @@ const buildObjectDefinition = (
   )} }`;
 };
 
+const buildDocs = (symbol: ts.Symbol, checker: ts.TypeChecker): string => {
+  let docs =
+    symbol
+      ?.getDocumentationComment(checker)
+      .filter((doc) => doc.kind === "text")
+      .map((doc) => doc.text) ?? [];
+
+  let docComment = "";
+
+  if (docs.length > 0) {
+    docComment = `{-| ${docs.join("\n")} -}\n`;
+  }
+  return docComment;
+};
+
 export const buildType = (
   type: ts.Type,
   checker: ts.TypeChecker,
@@ -129,8 +144,9 @@ export const buildType = (
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
-    case ts.TypeFlags.Never:
       error("Emtpy/void types not supported");
+    case ts.TypeFlags.Never:
+      return elm`Never`;
 
     case ts.TypeFlags.TypeParameter:
       return elm`${toValueCase(type.symbol.name)}`;
@@ -142,30 +158,19 @@ export const buildType = (
           node
         )})`;
       }
-      console.log(
-        "target",
-        checker.typeToString(type),
-        (type as ts.ObjectType).objectFlags,
-        type.aliasSymbol
-      );
+
       if (type.aliasSymbol) {
-        // let refType = checker.getSignaturesOfType(type, ts.SignatureKind.);
-        // let refType = checker.getTypeAtLocation(
-        //   (type.aliasSymbol.declarations?.[0] as ts.TypeAliasDeclaration).type!
-        // );
-        console.log(type.aliasSymbol);
         const args =
           type.aliasTypeArguments?.map((arg) =>
             buildType(arg, checker, node)
           ) ?? [];
-        console.log(
-          "declared",
-          checker.getDeclaredTypeOfSymbol(type.aliasSymbol)
-        );
+
         let refType = checker.getDeclaredTypeOfSymbol(type.aliasSymbol);
-        // return;
-        // console.log("refType", refType);
-        let ref = elm`type alias ${toTypeCase(type.aliasSymbol.name)}${
+
+        let ref = elm`${buildDocs(
+          type.aliasSymbol,
+          checker
+        )}type alias ${toTypeCase(type.aliasSymbol.name)}${
           refType.aliasTypeArguments == null
             ? ""
             : " " +
@@ -182,7 +187,7 @@ export const buildType = (
         let begin = {
           expression: toTypeCase(type.aliasSymbol.name),
           definitions: new Map([
-            [type.aliasSymbol.name, ref.expression],
+            [toTypeCase(type.aliasSymbol.name), ref.expression],
             ...ref.definitions.entries(),
           ]),
         };
@@ -193,7 +198,9 @@ export const buildType = (
       let ref;
       switch ((type as ts.ObjectType).objectFlags) {
         case ts.ObjectFlags.Interface:
-          ref = elm`type alias ${type.symbol.name} = ${buildObjectDefinition(
+          ref = elm`${buildDocs(type.symbol, checker)}type alias ${toTypeCase(
+            type.symbol.name
+          )} = ${buildObjectDefinition(
             type,
             checker,
             node,
@@ -202,7 +209,7 @@ export const buildType = (
           return {
             expression: type.symbol.name,
             definitions: new Map([
-              [type.symbol.name, ref.expression],
+              [toTypeCase(type.symbol.name), ref.expression],
               ...ref.definitions,
             ]),
           };
@@ -211,9 +218,10 @@ export const buildType = (
           const args =
             t.typeArguments?.map((arg) => buildType(arg, checker, node)) ?? [];
 
-          console.log(args);
-
-          ref = elm`type alias ${toTypeCase(t.target.symbol.name)}${
+          ref = elm`${buildDocs(
+            t.target.symbol,
+            checker
+          )}type alias ${toTypeCase(t.target.symbol.name)}${
             t.target.typeArguments == null
               ? ""
               : " " +
@@ -230,7 +238,7 @@ export const buildType = (
           let begin = {
             expression: toTypeCase(t.symbol.name),
             definitions: new Map([
-              [t.target.symbol.name, ref.expression],
+              [toTypeCase(t.target.symbol.name), ref.expression],
               ...ref.definitions.entries(),
             ]),
           };
@@ -260,7 +268,10 @@ export const buildType = (
                 )
           )
         ) {
-          let ref = elm`type ${toTypeCase(type.aliasSymbol.name)} = ${join(
+          let ref = elm`${buildDocs(
+            type.aliasSymbol,
+            checker
+          )}type ${toTypeCase(type.aliasSymbol.name)} = ${join(
             refType.types.map((t) => {
               if (t.isStringLiteral()) {
                 return elm`${toTypeCase(t.value)}`;
@@ -283,7 +294,7 @@ export const buildType = (
           return {
             expression: toTypeCase(type.aliasSymbol.name),
             definitions: new Map([
-              [type.aliasSymbol.name, ref.expression],
+              [toTypeCase(type.aliasSymbol.name) + "(..)", ref.expression],
               ...ref.definitions,
             ]),
           };
@@ -298,7 +309,7 @@ export const buildType = (
           const subtype = t.types.find(
             (t) => t.flags !== ts.TypeFlags.Undefined
           );
-          return elm`Maybe ${buildType(subtype!, checker, node)}`;
+          return elm`Maybe (${buildType(subtype!, checker, node)})`;
         }
         error("Anonymous union types not supported");
       }

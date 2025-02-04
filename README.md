@@ -13,11 +13,19 @@ Let's look at an example of a simple `SizeObserver` web component:
 ```typescript
 import { CustomElement, component, optional } from "elm-webcomponents";
 
+/**
+ * The dimensions of the element being observed.
+ */
+interface Box {
+  width: number;
+  height: number;
+}
+
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
 class SizeObserver extends CustomElement<{
   requiredEvents: {
-    sizeChange: { width: number; height: number };
+    sizeChange: Box;
   };
   htmlContent: "single";
   viewFnName: "container";
@@ -55,19 +63,25 @@ class SizeObserver extends CustomElement<{
 When you run this tool, you will get the following file generated for you:
 
 ```elm
-module SizeObserver exposing (view, debounce)
+module SizeObserver exposing (container, debounce, Box)
 
 {-| Observes an element and triggers events whenever the contents size changes.
 
-@docs container, debounce
+@docs container, debounce, Box
 
 -}
 
-import Html exposing (Html)
-import Html.Attributes exposing (Attribute)
+import Html exposing (Attribute, Html)
+import Html.Attributes
 import Html.Events
 import Json.Decode as Decode
 import Json.Encode as Encode
+
+
+{-| The dimensions of the element being observed.
+-}
+type alias Box =
+    { width : Float, height : Float }
 
 
 {-| Number of milliseconds to debounce.
@@ -78,18 +92,14 @@ debounce val =
 
 
 {-| -}
-container :
-    List (Attribute msg)
-    -> { onSizeChange : { width : Float, height : Float } -> msg }
-    -> Html msg
-    -> Html msg
+container : List (Attribute msg) -> { onSizeChange : Box -> msg } -> Html msg -> Html msg
 container attrs req child =
     Html.node "size-observer"
         (Html.Events.on "sizeChange"
             (Decode.map req.onSizeChange
-                (Decode.map2 (\width height -> { width = width, height = height })
-                    (Decode.field "width" Decode.float)
-                    (Decode.field "height" Decode.height)
+                (Decode.succeed (\width height -> { width = width, height = height })
+                    |> Decode.map2 (|>) (Decode.field "width" Decode.float)
+                    |> Decode.map2 (|>) (Decode.field "height" Decode.float)
                 )
             )
             :: attrs

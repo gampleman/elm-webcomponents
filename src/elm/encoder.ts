@@ -59,7 +59,6 @@ export const buildEncoder = (
     case ts.TypeFlags.Object:
       if (checker.isArrayType(type)) {
         [variable, newScope] = introduce("el", scope);
-        console.log("variable", variable, newScope);
         return `Encode.list (\\${variable} -> ${buildEncoder(
           checker.getTypeArguments(type as ts.TypeReference)[0],
           variable,
@@ -94,7 +93,10 @@ export const buildEncoder = (
         const subtype = refType.types.find(
           (t) => t.flags !== ts.TypeFlags.Undefined
         );
-        [variable, newScope] = introduce(subtype.symbol?.name ?? "val", scope);
+        [variable, newScope] = introduce(
+          toValueCase(subtype.symbol?.name ?? "val"),
+          scope
+        );
         return `case (${value}) of
     Nothing -> Encode.null
     Just ${variable} -> ${buildEncoder(subtype, variable, checker, newScope)}

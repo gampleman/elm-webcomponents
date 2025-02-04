@@ -20,11 +20,19 @@ type Int = number;
 //   baz: Int;
 // }
 
+/**
+ * The dimensions of the element being observed.
+ */
+interface Box {
+  width: number;
+  height: number;
+}
+
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
 class SizeObserver extends CustomElement<{
   requiredEvents: {
-    sizeChange: { width: number; height: number };
+    sizeChange: Box;
   };
   htmlContent: "single";
   viewFnName: "container";
@@ -117,10 +125,10 @@ export class ReactyThing extends CustomElement<{
   accessor disabled: Value;
 
   @optional
-  accessor el: Placeholder<number> | null;
+  accessor el: Placeholder<number> | undefined;
 
   @lazy
-  accessor value: Placeholder<number> | null;
+  accessor value: Placeholder<number> | undefined;
 
   @required
   accessor test: { foo: string } & { bar: number };
