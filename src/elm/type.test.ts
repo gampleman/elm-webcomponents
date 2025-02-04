@@ -45,12 +45,12 @@ describe.each([
     new Map([["Foo", "type alias Foo = { foo : String }"]]),
     "Foo",
   ],
-  // [
-  //   "type Foo = {foo?: string}",
-  //   "Foo",
-  //   new Map([["Foo", "type alias Foo = { foo : Maybe String }"]]),
-  //   "Foo",
-  // ],
+  [
+    "type Foo = {foo?: string}",
+    "Foo",
+    new Map([["Foo", "type alias Foo = { foo : Maybe String }"]]),
+    "Foo",
+  ],
   [
     "type Foo<P> = {foo: P}",
     "Foo<number>",
@@ -109,7 +109,7 @@ describe.each([
       return orig(fileName, ...args);
     };
 
-    const program = ts.createProgram(["input.ts"], {}, host);
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
     const checker = program.getTypeChecker();
     const ast = program.getSourceFile("input.ts")!;
     query(ast, "VariableDeclaration").forEach((stmt) => {

@@ -331,19 +331,19 @@ export const main = ({
   inputFiles: string[];
   outputDir: string;
 }) => {
-  const program = ts.createProgram(inputFiles, {});
-  const output = transform(inputFiles, program);
-  [...output.entries()].forEach(([fileName, content]) => {
-    try {
+  try {
+    const program = ts.createProgram(inputFiles, { strictNullChecks: true });
+    const output = transform(inputFiles, program);
+    [...output.entries()].forEach(([fileName, content]) => {
       fs.writeFileSync(path.join(outputDir, fileName), content);
-    } catch (e) {
-      if (e instanceof TransformError) {
-        handler(e);
-      } else {
-        throw e;
-      }
+    });
+  } catch (e) {
+    if (e instanceof TransformError) {
+      handler(e);
+    } else {
+      throw e;
     }
-  });
+  }
 };
 
 type Attr = { name: string; comment: string; type: ts.Type; elmType: ElmType };

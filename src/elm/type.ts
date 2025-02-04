@@ -55,11 +55,11 @@ const buildObjectDefinition = (
       .filter(
         (prop) =>
           !filterOutLiterals ||
-          !checker.getTypeAtLocation(prop.valueDeclaration).isStringLiteral()
+          !checker.getTypeAtLocation(prop.valueDeclaration!).isStringLiteral()
       )
       .map((prop) => {
         return elm`${toValueCase(prop.getName())} : ${buildType(
-          checker.getTypeAtLocation(prop.valueDeclaration),
+          checker.getTypeAtLocation(prop.valueDeclaration!),
           checker,
           lastNode,
           false
@@ -75,11 +75,11 @@ export const buildType = (
   lastNode: ts.Node,
   filterOutLiterals = false
 ): Type => {
-  let node;
+  let node: ts.Node;
   if (type.symbol && type.symbol.getDeclarations()?.[0]) {
-    node = type.symbol.getDeclarations()?.[0];
+    node = type.symbol.getDeclarations()?.[0]!;
   } else if (type.aliasSymbol && type.aliasSymbol.getDeclarations()?.[0]) {
-    node = type.aliasSymbol.getDeclarations()?.[0];
+    node = type.aliasSymbol.getDeclarations()?.[0]!;
   } else {
     node = lastNode;
   }
@@ -255,7 +255,7 @@ export const buildType = (
                 .getProperties()
                 .some((sym) =>
                   checker
-                    .getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+                    .getTypeOfSymbolAtLocation(sym, sym.valueDeclaration!)
                     .isStringLiteral()
                 )
           )
@@ -268,10 +268,14 @@ export const buildType = (
               return elm`${toTypeCase(
                 t
                   .getProperties()
-                  .map((sym) =>
-                    checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+                  .map(
+                    (sym) =>
+                      checker.getTypeOfSymbolAtLocation(
+                        sym,
+                        sym.valueDeclaration!
+                      )!
                   )
-                  .find((ts) => ts.isStringLiteral())?.value
+                  .find((ts) => ts.isStringLiteral())?.value ?? ""
               )} (${buildType(t, checker, node, true)})`;
             }),
             " | "
@@ -285,7 +289,19 @@ export const buildType = (
           };
         } else
           error(`${checker.typeToString(type)} is not a supported Union type`);
-      } else error("Anonymous union types not supported");
+      } else {
+        let t = type as ts.UnionType;
+        if (
+          t.types.length === 2 &&
+          t.types.some((t) => t.flags === ts.TypeFlags.Undefined)
+        ) {
+          const subtype = t.types.find(
+            (t) => t.flags !== ts.TypeFlags.Undefined
+          );
+          return elm`Maybe ${buildType(subtype!, checker, node)}`;
+        }
+        error("Anonymous union types not supported");
+      }
 
     case ts.TypeFlags.Intersection:
       return buildObjectDefinition(type, checker, node, false);
@@ -323,6 +339,11 @@ export const buildType = (
 
     default:
       error(
+        `Advanced types not supported (${type.flags}): ${checker.typeToString(
+          type
+        )}`
+      );
+      return error(
         `Advanced types not supported (${type.flags}): ${checker.typeToString(
           type
         )}`

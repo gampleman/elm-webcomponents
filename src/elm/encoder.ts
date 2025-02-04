@@ -50,6 +50,7 @@ export const buildEncoder = (
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
+      return `Encode.null`;
     case ts.TypeFlags.Never:
       throw new Error("Emtpy/void types not supported");
 
@@ -81,9 +82,24 @@ export const buildEncoder = (
         .join("\n    , ")}]`;
 
     case ts.TypeFlags.Union:
-      let refType = checker.getDeclaredTypeOfSymbol(
+      let refType = (
         type.aliasSymbol
+          ? checker.getDeclaredTypeOfSymbol(type.aliasSymbol)
+          : type
       ) as ts.UnionType;
+      if (
+        refType.types.length === 2 &&
+        refType.types.some((t) => t.flags === ts.TypeFlags.Undefined)
+      ) {
+        const subtype = refType.types.find(
+          (t) => t.flags !== ts.TypeFlags.Undefined
+        );
+        [variable, newScope] = introduce(subtype.symbol?.name ?? "val", scope);
+        return `case (${value}) of
+    Nothing -> Encode.null
+    Just ${variable} -> ${buildEncoder(subtype, variable, checker, newScope)}
+`;
+      }
       return `case (${value}) of
         ${refType.types
           .map((t) => {

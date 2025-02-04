@@ -496,6 +496,8 @@ Union types are supported with the following limitations:
 
   won't.
 
+- There is special case support for `undefined | someType`, which will be translated to `Maybe SomeType`. For this to work, you will need `strictNullChecks` enabled in your tsconfig.
+
 Intersection types are supported in an experimental and rudimentary way. Best avoided, but they may work.
 
 Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.

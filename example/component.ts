@@ -8,15 +8,17 @@ import {
   type HtmlContent,
 } from "../src";
 
+import { Foo } from "./related";
+
 import style from "./app/styles";
 
 type Int = number;
 
-interface Foo {
-  /** bar comment */
-  bar: string;
-  baz: Int;
-}
+// interface Foo {
+//   /** bar comment */
+//   bar: string;
+//   baz: Int;
+// }
 
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")

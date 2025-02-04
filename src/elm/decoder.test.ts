@@ -57,12 +57,12 @@ describe.each([
     `Decode.succeed (\\foo -> { foo = foo })
       |> Decode.map2 (|>) (Decode.field "foo" (Decode.string))`,
   ],
-  // [
-  //   "type Foo = {foo?: string}",
-  //   "Foo",
-  //   `Decode.succeed (\\foo -> { foo = foo })
-  //     |> Decode.map2 (|>) (Decode.field "foo" (Decode.nullable (Decode.string)))`,
-  // ],
+  [
+    "type Foo = {foo?: string}",
+    "Foo",
+    `Decode.succeed (\\foo -> { foo = foo })
+      |> Decode.map2 (|>) (Decode.field "foo" (Decode.nullable (Decode.string)))`,
+  ],
   [
     "type Foo<P> = {foo: P}",
     "Foo<number>",
@@ -123,7 +123,7 @@ describe.each([
       return orig(fileName, ...args);
     };
 
-    const program = ts.createProgram(["input.ts"], {}, host);
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
     const checker = program.getTypeChecker();
     const ast = program.getSourceFile("input.ts")!;
     query(ast, "VariableDeclaration").forEach((stmt) => {

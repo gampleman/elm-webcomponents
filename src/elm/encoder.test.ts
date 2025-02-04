@@ -50,10 +50,10 @@ describe.each([
   [
     "type Foo = {foo?: string}",
     "Foo",
-    `Encode.object [ ( "foo", case value.foo of 
-        Just string -> Encode.string string 
-        Nothing -> Encode.null 
-        )]`,
+    `Encode.object [ ( "foo", case (value.foo) of
+    Nothing -> Encode.null
+    Just val -> Encode.string val
+ )]`,
   ],
   [
     "type Foo<P> = {foo: P}",
@@ -113,7 +113,7 @@ describe.each([
       return orig(fileName, ...args);
     };
 
-    const program = ts.createProgram(["input.ts"], {}, host);
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
     const checker = program.getTypeChecker();
     const ast = program.getSourceFile("input.ts")!;
     query(ast, "VariableDeclaration").forEach((stmt) => {

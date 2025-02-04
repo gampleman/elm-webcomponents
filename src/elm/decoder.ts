@@ -108,9 +108,21 @@ export const buildDecoder = (
         .join("\n      ")}`;
 
     case ts.TypeFlags.Union:
-      let refType = checker.getDeclaredTypeOfSymbol(
+      let refType = (
         type.aliasSymbol
+          ? checker.getDeclaredTypeOfSymbol(type.aliasSymbol)
+          : type
       ) as ts.UnionType;
+      if (
+        refType.types.length === 2 &&
+        refType.types.some((t) => t.flags === ts.TypeFlags.Undefined)
+      ) {
+        const subtype = refType.types.find(
+          (t) => t.flags !== ts.TypeFlags.Undefined
+        );
+
+        return `Decode.nullable (${buildDecoder(subtype, checker, scope)})`;
+      }
       return `Decode.oneOf [${refType.types
         .map((t) => {
           if (t.isStringLiteral()) {
