@@ -63,7 +63,7 @@ type alias Foo = { foo : String }`,
   [
     "type Foo = {foo?: string}",
     "Foo",
-    new Map([["Foo", "type alias Foo = { foo : Maybe String }"]]),
+    new Map([["Foo", "type alias Foo = { foo : Maybe (String) }"]]),
     "Foo",
   ],
   [
