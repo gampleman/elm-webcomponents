@@ -103,7 +103,7 @@ export class CustomElement<
     name: Name,
     data: Data
   ) {
-    this.dispatchEvent(new CustomEvent(name, data));
+    this.dispatchEvent(new CustomEvent(name, { detail: data }));
   }
 }
 
@@ -137,7 +137,10 @@ function decorator<T, V>(
   if (context.kind === "accessor") {
     return {
       set(this: CustomElement<T>, value: V) {
-        context.access.set.call(this, value);
+        // `access` is the original auto-accessor's { get, set } pair, invoked
+        // with the instance as receiver. (Note: `context.access.set` has the
+        // shape `set(instance, value)` and must NOT be used here.)
+        access.set.call(this, value);
         this.scheduleUpdate?.();
       },
     };

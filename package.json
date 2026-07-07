@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "build": "pkgroll",
+    "prepare": "pkgroll",
     "e2e": "mkdir -p example/elm-webcomponents && tsx src/cli.ts -o example/elm-webcomponents example/component.ts && elm-format --yes example/elm-webcomponents && elm make example/elm-webcomponents/*.elm",
     "dev": "vite dev",
     "prepublishOnly": "agadoo"

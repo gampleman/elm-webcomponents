@@ -437,6 +437,119 @@ class ExampleComponent extends IsolatedComponent<{
 
 The `adoptedStyles` property is key, as this will efficiently allow every style declared in your stylesheet to be accessed from inside the Shadow DOM.
 
+## Setup
+
+Getting this working in a real project involves three pieces: installing the package, wiring up code generation, and making your bundler and Elm compiler aware of the generated files. There is also one important bundler gotcha covered at the end.
+
+### 1. Install
+
+```sh
+npm install elm-webcomponents
+```
+
+The package ships both a runtime (the `CustomElement`/`IsolatedCustomElement` base classes and decorators, which _are_ bundled into your client) and a CLI (`elm-webcomponents`, used only at build time for code generation).
+
+### 2. Author your components
+
+Put your annotated component files somewhere your bundler will include them (e.g. import them from your entry point so they get registered). We recommend keeping them in a dedicated directory — say `src/components/` — because the code generator globs over them.
+
+### 3. Wire up code generation
+
+Run the CLI over your component files, pointing `-o` at an output directory for the generated Elm:
+
+```sh
+elm-webcomponents -o generated/elm src/components/*.ts
+```
+
+The generated modules are meant to be committed-or-regenerated, not hand-edited. It's convenient to run this as part of your existing codegen step, and to format the output afterwards:
+
+```jsonc
+// package.json
+{
+  "scripts": {
+    "codegen": "elm-webcomponents -o generated/elm src/components/*.ts && elm-format generated/elm --yes",
+  },
+}
+```
+
+> [!TIP]
+> The CLI does not create the output directory for you, so make sure it exists (e.g. commit a `.gitkeep`, or `mkdir -p` first).
+
+### 4. Tell Elm about the generated modules
+
+The generated modules use **flat module names** (e.g. `SizeObserver`, not `Components.SizeObserver`). Elm requires a module's name to match its path _relative to a source directory_, so the output directory must itself be a source directory. Add it to your `elm.json`:
+
+```jsonc
+// elm.json
+{
+  "source-directories": [
+    "src",
+    "generated/elm", // <- the -o directory from step 3
+  ],
+}
+```
+
+If you use `elm-review`, you'll also want to exclude the generated directory, since the output isn't meant to satisfy every lint (e.g. it may import `Json.Encode` even for a component that only has events):
+
+```elm
+-- review/src/ReviewConfig.elm
+config =
+    [ {- your rules -} ]
+        |> List.map (Review.Rule.ignoreErrorsForDirectories [ "generated/elm" ])
+```
+
+### 5. Make your bundler transform the decorators
+
+This library uses **standard (TC39) decorators** and the `accessor` keyword. Your bundler must down-level these to something browsers run today — and **not every bundler does**. Two things to watch for:
+
+- **TypeScript config:** you _must not_ enable `experimentalDecorators` (that opts into the old, incompatible decorator semantics). Leave it off. See the [Compatibility](#typescript) section below.
+- **The bundler's transformer:** some transformers pass standard decorators through untouched, which then throw in the browser.
+
+`esbuild` (and therefore the default Vite pipeline in most setups) lowers standard decorators correctly when targeting `es2022` or similar — nothing extra is needed there.
+
+> [!WARNING]
+> **Vite 8 / Rolldown and `@vitejs/plugin-react` use `oxc`, which (as of writing) does _not_ lower standard decorators** — it only supports the legacy flavor. If your components render but you see raw `@component(...)`/`accessor` in the served/built output, or a `SyntaxError` in the browser, this is why. Setting `esbuild.target` in your Vite config does _not_ help, because `oxc`/`plugin-react` handles `.ts` before esbuild ever runs.
+>
+> The fix is a small `enforce: "pre"` plugin that runs `esbuild` on your component files _before_ the oxc transform sees them:
+>
+> ```ts
+> // vite.config.ts
+> import { transform } from "esbuild";
+>
+> const ewcDecorators = () => ({
+>   name: "ewc-decorators",
+>   enforce: "pre" as const,
+>   async transform(code: string, id: string) {
+>     // scope this to wherever your annotated components live
+>     if (!/\/components\/.*\.ts$/.test(id)) return null;
+>     const result = await transform(code, {
+>       loader: "ts",
+>       target: "es2022",
+>       sourcefile: id,
+>       sourcemap: true,
+>     });
+>     return { code: result.code, map: result.map };
+>   },
+> });
+>
+> export default defineConfig({
+>   plugins: [ewcDecorators() /* , react(), ... */],
+> });
+> ```
+>
+> Keep the file filter tight (only your component directory) so you don't double-transform the rest of your app.
+
+### 6. Register and use
+
+Import your component files from your entry point so the `@component` decorator runs and registers the custom elements:
+
+```ts
+// index.ts
+import "./components/size-observer";
+```
+
+Then use the generated Elm module as shown throughout this README. If you use the [Shadow DOM style-piercing](#problems-of-shadow-dom-and-style-piercing) approach, also make sure your stylesheet is imported as a constructed stylesheet as described there.
+
 ## Compatibility
 
 ### TypeScript

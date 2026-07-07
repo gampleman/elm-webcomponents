@@ -463,6 +463,9 @@ const formatElmFile = (info: OutputInfo) => {
     ...(info.htmlContent == "list" ? ["children"] : ["child"]),
     ...info.properties.lazy.map((la) => toValueCase(la.name) + "ValueSetter"),
     "tagger",
+    // `val` is the parameter name for optional-property and lazy setters, so it
+    // must be reserved to stop nested encoders (e.g. the Maybe branch) shadowing it.
+    "val",
   ];
   const scope = buildScope(scopeNames);
 
@@ -506,11 +509,11 @@ ${toValueCase(`on ${oa.name}`)} : (${
         oa.elmType.expression
       } -> msg) -> Attribute msg
 ${toValueCase(`on ${oa.name}`)} tagger = 
-      Html.Events.on "${oa.name}" (Decode.map tagger (${buildDecoder(
+      Html.Events.on "${oa.name}" (Decode.map tagger (Decode.field "detail" (${buildDecoder(
         oa.type,
         info.checker,
         scope
-      )}))
+      )})))
   `
   )
   .join("\n")}
@@ -562,7 +565,11 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
         (re) =>
           `Html.Events.on "${re.name}" (Decode.map req.${toValueCase(
             `on ${re.name}`
-          )} (${buildDecoder(re.type, info.checker, scope)}))
+          )} (Decode.field "detail" (${buildDecoder(
+            re.type,
+            info.checker,
+            scope
+          )})))
       `
       )
     )
