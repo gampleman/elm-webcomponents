@@ -353,6 +353,9 @@ export const main = ({
   } catch (e) {
     if (e instanceof TransformError) {
       handler(e);
+      // Signal failure so callers (e.g. a CI codegen step) don't treat an
+      // unsupported type as a successful run.
+      process.exitCode = 1;
     } else {
       throw e;
     }

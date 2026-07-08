@@ -1,6 +1,6 @@
 import * as ts from "typescript";
 import { toTypeCase, toValueCase } from "./utils";
-import { TransformError } from "../error";
+import { TransformError, nodeFromType } from "../error";
 
 export type Type = {
   expression: string;
@@ -90,14 +90,10 @@ export const buildType = (
   lastNode: ts.Node,
   filterOutLiterals = false
 ): Type => {
-  let node: ts.Node;
-  if (type.symbol && type.symbol.getDeclarations()?.[0]) {
-    node = type.symbol.getDeclarations()?.[0]!;
-  } else if (type.aliasSymbol && type.aliasSymbol.getDeclarations()?.[0]) {
-    node = type.aliasSymbol.getDeclarations()?.[0]!;
-  } else {
-    node = lastNode;
-  }
+  // Blame the type's own declaration when it lives in the user's code,
+  // otherwise fall back to the referencing node so errors never point into
+  // library `.d.ts` files (e.g. the definition of `Record` or `Array`).
+  const node = nodeFromType(type, lastNode) ?? lastNode;
 
   const error = (message: string): never => {
     throw new TransformError(node, message);

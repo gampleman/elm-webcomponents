@@ -1,21 +1,31 @@
 import { DiagnosticsMessage } from "@dev-build-deploy/diagnose-it";
 import * as ts from "typescript";
 
+// A declaration that lives in a `.d.ts` file (e.g. the definition of `Record`
+// or `Array` in TypeScript's own lib files) is useless to blame in an error:
+// it points into node_modules rather than the user's code. We only want to
+// point at nodes that come from the sources we are actually processing.
+const isUserNode = (node: ts.Node | undefined): node is ts.Node =>
+  node != null && !node.getSourceFile().isDeclarationFile;
+
 /**
  * Finds the most relevant source node to blame for a type, so that errors about
- * an unsupported type can point at where it was declared. Falls back to the
- * provided node (e.g. the property that referenced the type) when the type
- * itself has no declaration, as is the case for primitives.
+ * an unsupported type can point at where it was used. Prefers the type's own
+ * declaration, but only when that declaration is in the user's own code; for
+ * library types (and primitives, which have no declaration) it falls back to
+ * the provided node, i.e. the place the type was referenced.
  */
 export const nodeFromType = (
   type: ts.Type,
   fallback?: ts.Node
 ): ts.Node | undefined => {
-  return (
+  const declaration =
     type.symbol?.getDeclarations()?.[0] ??
-    type.aliasSymbol?.getDeclarations()?.[0] ??
-    fallback
-  );
+    type.aliasSymbol?.getDeclarations()?.[0];
+  if (isUserNode(declaration)) {
+    return declaration;
+  }
+  return fallback;
 };
 
 export class TransformError extends Error {

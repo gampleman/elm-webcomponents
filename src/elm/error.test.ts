@@ -68,3 +68,22 @@ describe.each([
     });
   });
 });
+
+describe("unsupported type reached through a library type", () => {
+  test("blames the usage site, not the library .d.ts declaration", () => {
+    expect.assertions(3);
+    // `Record<string, any>` bottoms out at the unsupported `any`. The offending
+    // declaration of `Record` lives in a lib `.d.ts`, so the error must instead
+    // point at where the type is used, in input.ts.
+    withType("Record<string, any>", (type, checker, node) => {
+      try {
+        buildType(type, checker, node);
+      } catch (e) {
+        expect(e).toBeInstanceOf(TransformError);
+        const diagnostic = (e as TransformError).diagnostic.toString();
+        expect(diagnostic).toContain("input.ts");
+        expect(diagnostic).not.toContain(".d.ts");
+      }
+    });
+  });
+});

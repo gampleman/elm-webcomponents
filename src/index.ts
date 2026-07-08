@@ -16,41 +16,42 @@ export type HtmlContent =
       };
     };
 
+type ConfigBase = {
+  /**
+   * Used to define events that are required arguments to the view function.
+   * Should contain a string literal key with the event name and a value with the type that should be decoded. */
+  requiredEvents?: { [eventName: string]: any };
+  /**
+   * Used to define events that are generated as optional attribute helpers.
+   * Should contain a string literal key with the event name
+   * and a value with the type that should be decoded.
+   * */
+  optionalEvents?: { [eventName: string]: any };
+  /**
+   * Used to define the html content of the element.
+   * If set to "none", the element does not have any html content and will have no such argument.
+   * If set to "single", the element has a single child.
+   * If set to "list", the element has a list of children.
+   * If set to an object, the view function will take HTML content as part of its required arguments record and will render them as slotted content.
+   * */
+  htmlContent?: HtmlContent;
+
+  /**
+   * If the element has no optional attributes/events, set this to false to avoid generating a list of attributes.
+   * This will prevent adding class/id attributes to the element.
+   * */
+  extraAttributes?: boolean;
+};
 /**
  * Base class for defining custom elements.
  */
 export class CustomElement<
-  Config extends {
-    /**
-     * Used to define events that are required arguments to the view function.
-     * Should contain a string literal key with the event name and a value with the type that should be decoded. */
-    requiredEvents?: { [eventName: string]: any };
-    /**
-     * Used to define events that are generated as optional attribute helpers.
-     * Should contain a string literal key with the event name
-     * and a value with the type that should be decoded.
-     * */
-    optionalEvents?: { [eventName: string]: any };
-    /**
-     * Used to define the html content of the element.
-     * If set to "none", the element does not have any html content and will have no such argument.
-     * If set to "single", the element has a single child.
-     * If set to "list", the element has a list of children.
-     * If set to an object, the view function will take HTML content as part of its required arguments record and will render them as slotted content.
-     * */
-    htmlContent?: HtmlContent;
-
-    /**
-     * If the element has no optional attributes/events, set this to false to avoid generating a list of attributes.
-     * This will prevent adding class/id attributes to the element.
-     * */
-    extraAttributes?: boolean;
-  } = {
+  Config extends ConfigBase = {
     requiredEvents: {};
     optionalEvents: {};
     htmlContent: "none";
     extraAttributes: true;
-  }
+  },
 > extends HTMLElement {
   #updateTask = false;
 
@@ -101,14 +102,14 @@ export class CustomElement<
       ? CustomElement<Config>
       : never,
     name: Name,
-    data: Data
+    data: Data,
   ) {
     this.dispatchEvent(new CustomEvent(name, { detail: data }));
   }
 }
 
 function hasUpdate<Sig>(
-  t: CustomElement<any>
+  t: CustomElement<any>,
 ): t is CustomElement<any> & { update: Sig } {
   return "update" in t && typeof t.update === "function";
 }
@@ -127,12 +128,12 @@ export const component =
     window.customElements.define(tagName, decorated);
   };
 
-function decorator<T, V>(
+function decorator<T extends ConfigBase, V>(
   access: any,
   context:
     | ClassAccessorDecoratorContext<CustomElement<T>, V>
     | ClassSetterDecoratorContext<CustomElement<T>, V>
-    | ClassFieldDecoratorContext<CustomElement<T>, V>
+    | ClassFieldDecoratorContext<CustomElement<T>, V>,
 ): any {
   if (context.kind === "accessor") {
     return {
@@ -147,7 +148,7 @@ function decorator<T, V>(
   }
   if (context.kind !== "setter" && context.kind !== "field") {
     throw new Error(
-      "this decorator can only be called on accessors, setters, or fields"
+      "this decorator can only be called on accessors, setters, or fields",
     );
   }
 }
@@ -172,7 +173,7 @@ export const required = decorator;
  *
  * @param options.updateAfterSet If set to false, the `update` method will not be called after the value is set.
  */
-export let lazy = <T, V>(
+export let lazy = <T extends ConfigBase, V>(
   ...args: Parameters<typeof decorator<T, V>>
 ): ReturnType<typeof decorator<T, V>> => {
   lazy = decorator;
@@ -195,7 +196,7 @@ export let lazy = <T, V>(
             el[name] = val;
           }
         }
-      }
+      },
     );
   }
   return decorator(...args);
@@ -205,7 +206,9 @@ export let lazy = <T, V>(
  * This sub class of CustomElement sets up a Shadow DOM for you
  * and includes some utilities for piercing it with styles.
  */
-export class IsolatedCustomElement<T> extends CustomElement<T> {
+export class IsolatedCustomElement<
+  T extends ConfigBase,
+> extends CustomElement<T> {
   #updateTask = false;
 
   /**
