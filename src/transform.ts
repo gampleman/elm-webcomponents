@@ -2,11 +2,13 @@ import { query, includes } from "@phenomnomnominal/tsquery";
 
 import * as ts from "typescript";
 import { buildEncoder } from "./elm/encoder";
-import { buildType } from "./elm/type";
+import { buildType, type Type as ElmType } from "./elm/type";
 import { buildDecoder } from "./elm/decoder";
-import { toValueCase, toTypeCase } from "./elm/utils";
+import { toValueCase, toTypeCase, buildScope } from "./elm/utils";
 import fs from "node:fs";
 import path from "node:path";
+import { typeDef } from "cmd-ts/dist/cjs/type";
+import { handler, TransformError } from "./error";
 
 type HtmlContent =
   | "none"
@@ -31,19 +33,42 @@ function extractEventsFromTypeVar(
   return checker
     .getPropertiesOfType(checker.getTypeOfSymbol(prop))
     .map((prop) => {
+      const type = checker.getTypeOfSymbolAtLocation(
+        prop,
+        prop.valueDeclaration!
+      );
+      const declaration = prop.getDeclarations()![0];
+      // The type-reference node (e.g. the `Foo` in `event: Foo`) carries the
+      // alias name for template-literal types, which the type itself drops.
+      const node =
+        (ts.isPropertySignature(declaration) ||
+          ts.isPropertyDeclaration(declaration)) &&
+        declaration.type
+          ? declaration.type
+          : declaration;
       return {
         name: prop.getName(),
         comment: ts.displayPartsToString(prop.getDocumentationComment(checker)),
-        type: checker.getTypeOfSymbolAtLocation(prop, prop.valueDeclaration!),
+        type,
+        node,
+        // Events flow into Elm (decoded), so template literals in the payload
+        // become plain Strings rather than opaque, unusable newtypes.
+        elmType: buildType(type, checker, node, false, true),
       };
     });
 }
 
 export const transform = (
   inputFiles: string[],
-  program: ts.Program
+  program: ts.Program,
+  modulePrefix = ""
 ): Map<string, string> => {
   const checker = program.getTypeChecker();
+  // Normalize the prefix into a trailing-dot form ("Components." or "") so it
+  // can be concatenated directly onto each generated module name.
+  const normalizedPrefix = modulePrefix
+    ? modulePrefix.replace(/\.+$/, "") + "."
+    : "";
   const outputInfos = inputFiles
     .flatMap((fileName) => {
       const ast = program.getSourceFile(fileName);
@@ -171,7 +196,6 @@ export const transform = (
               );
               if (extraAttributesProp != null) {
                 const t = checker.getTypeOfSymbol(extraAttributesProp);
-                console.log("extraAttributes", checker.typeToString(t));
                 if (checker.typeToString(t) == "false") {
                   extraAttributes = false;
                 }
@@ -242,27 +266,52 @@ export const transform = (
                 symbol.valueDeclaration!
               );
 
+              const targetNode = query(
+                propertyNode,
+                "TypeReference,SemicolonToken"
+              )[0];
+
               if (requiredDecorator) {
                 requiredAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
+                  elmType: buildType(type, checker, targetNode),
                 });
               } else if (lazyDecorator) {
                 lazyAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
+                  elmType: buildType(type, checker, targetNode),
                 });
               } else if (optionalDecorator) {
                 optionalAttributes.push({
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
+                  elmType: buildType(type, checker, targetNode),
                 });
               }
             }
           });
+
+          const getTypeDefs = (attrs: Attr[]) => {
+            return attrs.flatMap((attr) => [...attr.elmType.definitions]);
+          };
+          const getImports = (attrs: Attr[]) => {
+            return attrs.flatMap((attr) => attr.elmType.imports ?? []);
+          };
+          const allAttrLists = [
+            optionalAttributes,
+            requiredAttributes,
+            lazyAttributes,
+            events.required,
+            events.optional,
+          ];
 
           return {
             viewFnName,
@@ -272,7 +321,7 @@ export const transform = (
               lazy: lazyAttributes,
             },
             events,
-            moduleName: symbol.getName(),
+            moduleName: normalizedPrefix + symbol.getName(),
             moduleComments: ts.displayPartsToString(
               symbol.getDocumentationComment(checker)
             ),
@@ -283,36 +332,73 @@ export const transform = (
               optionalAttributes.length > 0 ||
               events.optional.length > 0 ||
               extraAttributes,
+            typeDefs: new Map([
+              ...getTypeDefs(optionalAttributes),
+              ...getTypeDefs(requiredAttributes),
+              ...getTypeDefs(lazyAttributes),
+              ...getTypeDefs(events.required),
+              ...getTypeDefs(events.optional),
+            ]),
+            // Imports required by custom `ElmType<...>` mappings, deduplicated.
+            customImports: [
+              ...new Set(allAttrLists.flatMap(getImports)),
+            ],
           };
         }
       });
     })
     .filter((x) => x != null) as OutputInfo[];
 
-  console.log(outputInfos);
-
   const output = new Map<string, string>();
   outputInfos.forEach((info) => {
-    output.set(info.moduleName + ".elm", formatElmFile(info));
+    // A dotted module name (from --module-prefix) maps to a nested path, since
+    // Elm requires a module's file path to mirror its name.
+    const relativePath = info.moduleName.split(".").join(path.sep) + ".elm";
+    output.set(relativePath, formatElmFile(info));
   });
   return output;
 };
 
 export const main = ({
   outputDir,
+  modulePrefix,
   inputFiles,
 }: {
   inputFiles: string[];
   outputDir: string;
+  modulePrefix?: string;
 }) => {
-  const program = ts.createProgram(inputFiles, {});
-  const output = transform(inputFiles, program);
-  [...output.entries()].forEach(([fileName, content]) => {
-    fs.writeFileSync(path.join(outputDir, fileName), content);
-  });
+  try {
+    const program = ts.createProgram(inputFiles, { strictNullChecks: true });
+    const output = transform(inputFiles, program, modulePrefix);
+    [...output.entries()].forEach(([fileName, content]) => {
+      const target = path.join(outputDir, fileName);
+      // A dotted module prefix maps to nested directories (e.g.
+      // Components.MyElement -> Components/MyElement.elm), so make sure the
+      // subdirectory exists before writing.
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    });
+  } catch (e) {
+    if (e instanceof TransformError) {
+      handler(e);
+      // Signal failure so callers (e.g. a CI codegen step) don't treat an
+      // unsupported type as a successful run.
+      process.exitCode = 1;
+    } else {
+      throw e;
+    }
+  }
 };
 
-type Attr = { name: string; comment: string; type: ts.Type };
+type Attr = {
+  name: string;
+  comment: string;
+  type: ts.Type;
+  /** The type-reference node, used to recover alias names TypeScript drops (e.g. template literals). */
+  node: ts.Node;
+  elmType: ElmType;
+};
 
 type AttrList = { optional: Attr[]; required: Attr[] };
 
@@ -326,6 +412,8 @@ type OutputInfo = {
   checker: ts.TypeChecker;
   htmlContent: HtmlContent;
   attributesArg: boolean;
+  typeDefs: Map<string, string>;
+  customImports: string[];
 };
 
 const htmlContentToTypeSig = (htmlContent: HtmlContent): string => {
@@ -418,7 +506,44 @@ const formatElmFile = (info: OutputInfo) => {
     ...info.events.optional.map((oa) => toValueCase(`on ${oa.name}`))
   );
 
+  exposing.push(...info.typeDefs.keys());
   const requiredArgs = getRequiredArgs(info);
+
+  // this constructs a list of all the names in the module scope and/or the name of one of the main arguments
+  const scopeNames = [
+    ...info.properties.optional.map((oa) => toValueCase(oa.name)),
+    ...info.events.optional.map((oa) => toValueCase(`on ${oa.name}`)),
+    info.viewFnName,
+    ...(info.attributesArg ? ["attrs"] : []),
+    ...(requiredArgs.length > 0 ? ["req"] : []),
+    ...(info.htmlContent == "list" ? ["children"] : ["child"]),
+    ...info.properties.lazy.map((la) => toValueCase(la.name) + "ValueSetter"),
+    "tagger",
+    // `val` is the parameter name for optional-property and lazy setters, so it
+    // must be reserved to stop nested encoders (e.g. the Maybe branch) shadowing it.
+    "val",
+    // Module-level generated names (opaque types and their smart constructors,
+    // enum/union types) must be reserved so decoder lambda parameters rename
+    // around them rather than shadowing (e.g. a `size` field vs. a `size`
+    // smart constructor). Strip the `(..)` exposing suffix some keys carry.
+    ...[...info.typeDefs.keys()].map((key) => key.replace(/\(\.\.\)$/, "")),
+  ];
+  const scope = buildScope(scopeNames);
+
+  // A `Dict String X` type only appears in the Elm type annotations produced by
+  // buildType (the `Encode.dict`/`Decode.dict` functions live in the Json
+  // modules we already import), so scanning the type expressions and generated
+  // type definitions is enough to decide whether to import `Dict`.
+  const allAttrs = [
+    ...info.properties.optional,
+    ...info.properties.required,
+    ...info.properties.lazy,
+    ...info.events.optional,
+    ...info.events.required,
+  ];
+  const usesDict =
+    allAttrs.some((attr) => /\bDict\b/.test(attr.elmType.expression)) ||
+    Array.from(info.typeDefs.values()).some((def) => /\bDict\b/.test(def));
 
   return `module ${info.moduleName} exposing (${exposing.join(", ")})
 
@@ -432,18 +557,25 @@ import Html.Attributes
 import Html.Events
 import Json.Encode as Encode
 import Json.Decode as Decode
+${usesDict ? "import Dict exposing (Dict)" : ""}
 ${info.properties.lazy.length > 0 ? "import Html.Lazy" : ""}
+${info.customImports.join("\n")}
+
+${Array.from(info.typeDefs.values()).join("\n\n")}
 
 ${info.properties.optional
   .map(
     (oa) =>
       `{-| ${oa.comment} -}
-${toValueCase(oa.name)} : ${buildType(oa.type, info.checker)} -> Attribute msg
+${toValueCase(oa.name)} : ${oa.elmType.expression} -> Attribute msg
 ${toValueCase(oa.name)} val = 
     Html.Attributes.property "${oa.name}" (${buildEncoder(
         oa.type,
         "val",
-        info.checker
+        info.checker,
+        scope,
+        8,
+        oa.node
       )})
 `
   )
@@ -453,15 +585,17 @@ ${info.events.optional
   .map(
     (oa) =>
       `{-| ${oa.comment} -}
-${toValueCase(`on ${oa.name}`)} : (${buildType(
-        oa.type,
-        info.checker
-      )} -> msg) -> Attribute msg
+${toValueCase(`on ${oa.name}`)} : (${
+        oa.elmType.expression
+      } -> msg) -> Attribute msg
 ${toValueCase(`on ${oa.name}`)} tagger = 
-      Html.Events.on "${oa.name}" (Decode.map tagger (${buildDecoder(
+      Html.Events.on "${oa.name}" (Decode.map tagger (Decode.field "detail" (${buildDecoder(
         oa.type,
-        info.checker
-      )}))
+        info.checker,
+        scope,
+        false,
+        oa.node
+      )})))
   `
   )
   .join("\n")}
@@ -473,20 +607,13 @@ ${info.viewFnName} : ${info.attributesArg ? "List (Attribute msg) -> " : ""}${
           .map((ra) => {
             switch (ra.kind) {
               case "property":
-                return `${toValueCase(ra.name)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )}`;
+                return `${toValueCase(ra.name)} : ${ra.elmType.expression}`;
               case "lazy":
-                return `${toValueCase(ra.name)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )}`;
+                return `${toValueCase(ra.name)} : ${ra.elmType.expression}`;
               case "event":
-                return `${toValueCase(`on ${ra.name}`)} : ${buildType(
-                  ra.type,
-                  info.checker
-                )} -> msg`;
+                return `${toValueCase(`on ${ra.name}`)} : ${
+                  ra.elmType.expression
+                } -> msg`;
               case "htmlContent":
                 return `${toValueCase(ra.name)} : ${
                   ra.mode == "list" ? "List" : ""
@@ -511,7 +638,10 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
         `Html.Attributes.property "${ra.name}" (${buildEncoder(
           ra.type,
           `req.${toValueCase(ra.name)}`,
-          info.checker
+          info.checker,
+          scope,
+          8,
+          ra.node
         )})`
     )
     .concat(
@@ -519,7 +649,13 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
         (re) =>
           `Html.Events.on "${re.name}" (Decode.map req.${toValueCase(
             `on ${re.name}`
-          )} (${buildDecoder(re.type, info.checker)}))
+          )} (Decode.field "detail" (${buildDecoder(
+            re.type,
+            info.checker,
+            scope,
+            false,
+            re.node
+          )})))
       `
       )
     )
@@ -541,17 +677,17 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
 ${info.properties.lazy
   .map(
     (la) =>
-      `${toValueCase(la.name)}ValueSetter : ${buildType(
-        la.type,
-        info.checker
-      )} -> Html msg
+      `${toValueCase(la.name)}ValueSetter : ${la.elmType.expression} -> Html msg
 ${toValueCase(la.name)}ValueSetter val = 
   Html.node "ewc-value-setter" [ Html.Attributes.property "key" (Encode.string "${
     la.name
   }"), Html.Attributes.property "value" (${buildEncoder(
         la.type,
         "val",
-        info.checker
+        info.checker,
+        scope,
+        8,
+        la.node
       )})] []
 `
   )

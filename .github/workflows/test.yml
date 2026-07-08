@@ -1,0 +1,30 @@
+name: Test
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test
+        run: npm test
+
+      - name: E2E Test
+        run: npm run e2e
+
+      - name: Build
+        run: npm run build
+
+      - name: "Pre-publish"
+        run: npx pkg-pr-new publish

@@ -1,4 +1,73 @@
 /**
+ * Maps a TypeScript type to an arbitrary Elm type of your choosing, letting you
+ * plug in Elm types the generator doesn't know about (e.g. `Time.Posix`), or
+ * override the default mapping for a built-in type.
+ *
+ * This is a branded version of a `Base` type: it behaves like `Base` at runtime,
+ * but the generator detects the brand and emits your Elm type, decoder and
+ * encoder instead of the default mapping for `Base`.
+ *
+ * The type parameters are all string literals (or a string tuple) the generator
+ * reads:
+ * - `Name` — the Elm type expression, e.g. `"Time.Posix"`.
+ * - `Decoder` — a complete `Json.Decode.Decoder Name` expression, emitted
+ *   verbatim, e.g. `"Decode.map Time.millisToPosix Decode.int"`. Optional: omit
+ *   it (or pass `""`) for types that only flow *out* of Elm (properties); using
+ *   such a type in an event payload is then a generation error.
+ * - `Encoder` — a `Name -> Json.Encode.Value` function; the generator applies
+ *   it to the value, e.g. `"\\p -> Encode.int (Time.posixToMillis p)"`. Optional
+ *   in the same way, for types that only flow *into* Elm (events).
+ * - `Modules` — fully-qualified Elm module names the snippets reference, e.g.
+ *   `["Time"]`. The generator emits `import <Module>` for each (deduplicated),
+ *   so it always imports them unqualified — avoiding conflicting-alias problems
+ *   between different usages. Note that `Json.Decode as Decode` and
+ *  `Json.Encode as Encode` are guaranteed to be in scope, so do not need to be
+ *  explicitely specified here.
+ *
+ * @example
+ * ```ts
+ * type Posix = ElmType<
+ *   number,
+ *   "Time.Posix",
+ *   "Decode.map Time.millisToPosix Decode.int",
+ *   "\\p -> Encode.int (Time.posixToMillis p)",
+ *   ["Time"]
+ * >;
+ *
+ * @required accessor timestamp!: Posix;
+ * ```
+ */
+export type ElmType<
+  Base,
+  Name extends string,
+  Decoder extends string = "",
+  Encoder extends string = "",
+  Modules extends readonly string[] = [],
+> = Base & {
+  readonly __elmType__: Name;
+  readonly __elmDecoder__: Decoder;
+  readonly __elmEncoder__: Encoder;
+  readonly __elmModules__: Modules;
+};
+
+/**
+ * Marks a `number` that should be generated as an Elm `Int` rather than the
+ * default `Float`. TypeScript has no distinct integer type, so this is a branded
+ * `number` (a special case of {@link ElmType}): it behaves like a `number` at
+ * runtime and in arithmetic, but the generator emits `Int` (with `Encode.int` /
+ * `Decode.int`).
+ *
+ * Assigning a numeric literal may require a cast, e.g. `this.count = 5 as Int`.
+ *
+ * @example
+ * ```ts
+ * @required accessor count!: Int;
+ * @required accessor size!: { width: Int; height: Int };
+ * ```
+ */
+export type Int = ElmType<number, "Int", "Decode.int", "Encode.int">;
+
+/**
  * Defines how the in Elm the child nodes are going to be passed in.
  */
 export type HtmlContent =
@@ -16,41 +85,57 @@ export type HtmlContent =
       };
     };
 
+type ConfigBase = {
+  /**
+   * Used to define events that are required arguments to the view function.
+   * Should contain a string literal key with the event name and a value with the type that should be decoded. */
+  requiredEvents?: { [eventName: string]: any };
+  /**
+   * Used to define events that are generated as optional attribute helpers.
+   * Should contain a string literal key with the event name
+   * and a value with the type that should be decoded.
+   * */
+  optionalEvents?: { [eventName: string]: any };
+  /**
+   * Used to define the html content of the element.
+   * If set to "none", the element does not have any html content and will have no such argument.
+   * If set to "single", the element has a single child.
+   * If set to "list", the element has a list of children.
+   * If set to an object, the view function will take HTML content as part of its required arguments record and will render them as slotted content.
+   * */
+  htmlContent?: HtmlContent;
+
+  /**
+   * If the element has no optional attributes/events, set this to false to avoid generating a list of attributes.
+   * This will prevent adding class/id attributes to the element.
+   * */
+  extraAttributes?: boolean;
+
+  /**
+   * The name of the generated Elm view function. Defaults to `"view"`.
+   * Set this to a string literal to rename it (e.g. `"container"`).
+   * */
+  viewFnName?: string;
+};
+
+/**
+ * Constrains a config type to _exactly_ the keys of {@link ConfigBase}: any
+ * extra key (e.g. a typo like `htmlContnet`) is mapped to `never`, so it fails
+ * to satisfy the constraint. This turns silently-ignored config keys into
+ * compile errors. Used as an F-bounded constraint: `Config extends NoExcess<Config>`.
+ */
+type NoExcess<Config> = ConfigBase &
+  Record<Exclude<keyof Config, keyof ConfigBase>, never>;
 /**
  * Base class for defining custom elements.
  */
 export class CustomElement<
-  Config extends {
-    /**
-     * Used to define events that are required arguments to the view function.
-     * Should contain a string literal key with the event name and a value with the type that should be decoded. */
-    requiredEvents?: { [eventName: string]: any };
-    /**
-     * Used to define events that are generated as optional attribute helpers.
-     * Should contain a string literal key with the event name
-     * and a value with the type that should be decoded.
-     * */
-    optionalEvents?: { [eventName: string]: any };
-    /**
-     * Used to define the html content of the element.
-     * If set to "none", the element does not have any html content and will have no such argument.
-     * If set to "single", the element has a single child.
-     * If set to "list", the element has a list of children.
-     * If set to an object, the view function will take HTML content as part of its required arguments record and will render them as slotted content.
-     * */
-    htmlContent?: HtmlContent;
-
-    /**
-     * If the element has no optional attributes/events, set this to false to avoid generating a list of attributes.
-     * This will prevent adding class/id attributes to the element.
-     * */
-    extraAttributes?: boolean;
-  } = {
+  Config extends NoExcess<Config> = {
     requiredEvents: {};
     optionalEvents: {};
     htmlContent: "none";
     extraAttributes: true;
-  }
+  },
 > extends HTMLElement {
   #updateTask = false;
 
@@ -101,14 +186,14 @@ export class CustomElement<
       ? CustomElement<Config>
       : never,
     name: Name,
-    data: Data
+    data: Data,
   ) {
-    this.dispatchEvent(new CustomEvent(name, data));
+    this.dispatchEvent(new CustomEvent(name, { detail: data }));
   }
 }
 
 function hasUpdate<Sig>(
-  t: CustomElement<any>
+  t: CustomElement<any>,
 ): t is CustomElement<any> & { update: Sig } {
   return "update" in t && typeof t.update === "function";
 }
@@ -127,24 +212,27 @@ export const component =
     window.customElements.define(tagName, decorated);
   };
 
-function decorator<V>(
+function decorator<T extends NoExcess<T>, V>(
   access: any,
   context:
-    | ClassAccessorDecoratorContext<CustomElement, V>
-    | ClassSetterDecoratorContext<CustomElement, V>
-    | ClassFieldDecoratorContext<CustomElement, V>
+    | ClassAccessorDecoratorContext<CustomElement<T>, V>
+    | ClassSetterDecoratorContext<CustomElement<T>, V>
+    | ClassFieldDecoratorContext<CustomElement<T>, V>,
 ): any {
   if (context.kind === "accessor") {
     return {
-      set(this: CustomElement, value: V) {
-        context.access.set.call(this, value);
+      set(this: CustomElement<T>, value: V) {
+        // `access` is the original auto-accessor's { get, set } pair, invoked
+        // with the instance as receiver. (Note: `context.access.set` has the
+        // shape `set(instance, value)` and must NOT be used here.)
+        access.set.call(this, value);
         this.scheduleUpdate?.();
       },
     };
   }
   if (context.kind !== "setter" && context.kind !== "field") {
     throw new Error(
-      "this decorator can only be called on accessors, setters, or fields"
+      "this decorator can only be called on accessors, setters, or fields",
     );
   }
 }
@@ -169,9 +257,9 @@ export const required = decorator;
  *
  * @param options.updateAfterSet If set to false, the `update` method will not be called after the value is set.
  */
-export let lazy = <V>(
-  ...args: Parameters<typeof decorator<V>>
-): ReturnType<typeof decorator<V>> => {
+export let lazy = <T extends NoExcess<T>, V>(
+  ...args: Parameters<typeof decorator<T, V>>
+): ReturnType<typeof decorator<T, V>> => {
   lazy = decorator;
   if (!window.customElements.get("ewc-value-setter")) {
     window.customElements.define(
@@ -192,7 +280,7 @@ export let lazy = <V>(
             el[name] = val;
           }
         }
-      }
+      },
     );
   }
   return decorator(...args);
@@ -202,7 +290,9 @@ export let lazy = <V>(
  * This sub class of CustomElement sets up a Shadow DOM for you
  * and includes some utilities for piercing it with styles.
  */
-export class IsolatedCustomElement<T> extends CustomElement<T> {
+export class IsolatedCustomElement<
+  T extends NoExcess<T>,
+> extends CustomElement<T> {
   #updateTask = false;
 
   /**

@@ -6,33 +6,53 @@ import {
   CustomElement,
   IsolatedCustomElement,
   type HtmlContent,
+  type Int,
+  ElmType,
 } from "../src";
+
+import { Foo } from "./related";
 
 import style from "./app/styles";
 
-type Int = number;
+// interface Foo {
+//   /** bar comment */
+//   bar: string;
+//   baz: Int;
+// }
 
-interface Foo {
-  /** bar comment */
-  bar: string;
-  baz: Int;
+/**
+ * The dimensions of the element being observed.
+ */
+interface Box {
+  width: number;
+  height: number;
 }
+
+type Size = `${number}px`;
+
+type Posix = ElmType<
+  number,
+  "Time.Posix",
+  "Decode.map Time.millisToPosix Decode.int", // a complete `Decoder Time.Posix`
+  "\\p -> Encode.int (Time.posixToMillis p)", // a `Time.Posix -> Encode.Value` function
+  ["Time"] // imports the snippets need
+>;
 
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
 class SizeObserver extends CustomElement<{
   requiredEvents: {
-    sizeChange: { width: number; height: number };
+    sizeChange: Box;
   };
   htmlContent: "single";
   viewFnName: "container";
 }> {
   /** Number of milliseconds to debounce.  */
   @optional
-  accessor debounce: number = 100;
+  accessor debounce: Int = 100 as Int;
 
-  #resizeObserver: ResizeObserver;
-  #timeout: NodeJS.Timeout | null = null;
+  #resizeObserver!: ResizeObserver;
+  #timeout: ReturnType<typeof setTimeout> | null = null;
   connectedCallback(): void {
     this.#resizeObserver = new ResizeObserver(() => {
       if (this.#timeout == null) {
@@ -62,7 +82,7 @@ class SizeObserver extends CustomElement<{
 class MyElement extends CustomElement<{
   optionalEvents: {
     /** foo comment */
-    Rendered: { foo: string };
+    Rendered: { foo: string; size: Size };
   };
   htmlContent: {
     header: { mode: "single" };
@@ -74,38 +94,64 @@ class MyElement extends CustomElement<{
 
   /** Some comments */
   @required
-  accessor otherProp: Foo;
+  accessor otherProp!: Foo;
+
+  @required
+  accessor size!: Size;
 
   render() {
-    this.triggerEvent("Rendered", { foo: "bar" });
+    this.triggerEvent("Rendered", { foo: "bar", size: this.size });
     console.log("rendered");
   }
 }
 
 type PlaceholderType = "slot" | "variable" | "context" | "system" | "local";
 
-interface Placeholder {
+interface Placeholder<Data> {
   name: string;
-  type: string;
-  dataType: string;
+  type: PlaceholderType;
+  dataType: Data;
 }
+
+type Value =
+  | {
+      type: "string_value";
+      value: string;
+    }
+  | { type: "int_value"; value: number };
 
 type Root = {
   html: HTMLElement;
 };
 
 @component("reacty-thing")
-export class ReactyThing extends CustomElement<{ extraAttributes: false }> {
-  #root: Root;
+export class ReactyThing extends CustomElement<{
+  extraAttributes: false;
+  requiredEvents: { click: Value; change: Placeholder<string>[] };
+}> {
+  #root!: Root;
 
   @required
-  accessor placeholders: Placeholder[];
+  accessor placeholders!: Placeholder<string>[];
 
   @required
-  accessor disabled: boolean;
+  accessor disabled!: Value;
+
+  @optional
+  accessor el: Placeholder<number> | undefined;
 
   @lazy
-  accessor value: Placeholder | null;
+  accessor value: Placeholder<number> | undefined;
+
+  @required
+  accessor test!: { foo: string } & { bar: number };
+
+  @optional
+  accessor time: Posix = 0 as Posix;
+
+  /** A dictionary of arbitrary string-keyed values. */
+  @optional
+  accessor metadata!: Record<string, string>;
 
   init() {
     this.#root = {

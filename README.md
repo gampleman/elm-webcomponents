@@ -13,11 +13,19 @@ Let's look at an example of a simple `SizeObserver` web component:
 ```typescript
 import { CustomElement, component, optional } from "elm-webcomponents";
 
+/**
+ * The dimensions of the element being observed.
+ */
+interface Box {
+  width: number;
+  height: number;
+}
+
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
 class SizeObserver extends CustomElement<{
   requiredEvents: {
-    sizeChange: { width: number; height: number };
+    sizeChange: Box;
   };
   htmlContent: "single";
   viewFnName: "container";
@@ -55,19 +63,25 @@ class SizeObserver extends CustomElement<{
 When you run this tool, you will get the following file generated for you:
 
 ```elm
-module SizeObserver exposing (view, debounce)
+module SizeObserver exposing (container, debounce, Box)
 
 {-| Observes an element and triggers events whenever the contents size changes.
 
-@docs container, debounce
+@docs container, debounce, Box
 
 -}
 
-import Html exposing (Html)
-import Html.Attributes exposing (Attribute)
+import Html exposing (Attribute, Html)
+import Html.Attributes
 import Html.Events
 import Json.Decode as Decode
 import Json.Encode as Encode
+
+
+{-| The dimensions of the element being observed.
+-}
+type alias Box =
+    { width : Float, height : Float }
 
 
 {-| Number of milliseconds to debounce.
@@ -78,18 +92,14 @@ debounce val =
 
 
 {-| -}
-container :
-    List (Attribute msg)
-    -> { onSizeChange : { width : Float, height : Float } -> msg }
-    -> Html msg
-    -> Html msg
+container : List (Attribute msg) -> { onSizeChange : Box -> msg } -> Html msg -> Html msg
 container attrs req child =
     Html.node "size-observer"
         (Html.Events.on "sizeChange"
             (Decode.map req.onSizeChange
-                (Decode.map2 (\width height -> { width = width, height = height })
-                    (Decode.field "width" Decode.float)
-                    (Decode.field "height" Decode.height)
+                (Decode.succeed (\width height -> { width = width, height = height })
+                    |> Decode.map2 (|>) (Decode.field "width" Decode.float)
+                    |> Decode.map2 (|>) (Decode.field "height" Decode.float)
                 )
             )
             :: attrs
@@ -123,7 +133,7 @@ import {
 @component("my-example")
 class MyExample extends CustomElement<{}> {
   @required
-  accessor foo: string;
+  accessor foo!: string;
 
   @optional
   accessor bar: bool = true;
@@ -150,7 +160,7 @@ These decorators can be applied to auto-accessors, setters and plain properties:
 @component("my-example")
 class MyExample extends CustomElement<{}> {
   @required
-  accessor foo: string;
+  accessor foo!: string;
 
   @required
   set bar(value: string) {
@@ -158,7 +168,7 @@ class MyExample extends CustomElement<{}> {
   }
 
   @required
-  baz: string;
+  baz!: string;
 }
 ```
 
@@ -245,10 +255,10 @@ import { component, required, optional } from "elm-webcomponents";
 @component("example-react")
 class MyComponent extends ReactCustomElement<{}> {
   @required
-  accessor someInput: string;
+  accessor someInput!: string;
 
-  @optiona
-  accessor someOtherInput: boolean;
+  @optional
+  accessor someOtherInput: boolean = false;
 
   render() {
     return (
@@ -427,6 +437,121 @@ class ExampleComponent extends IsolatedComponent<{
 
 The `adoptedStyles` property is key, as this will efficiently allow every style declared in your stylesheet to be accessed from inside the Shadow DOM.
 
+## Setup
+
+Getting this working in a real project involves three pieces: installing the package, wiring up code generation, and making your bundler and Elm compiler aware of the generated files. There is also one important bundler gotcha covered at the end.
+
+### 1. Install
+
+```sh
+npm install elm-webcomponents
+```
+
+The package ships both a runtime (the `CustomElement`/`IsolatedCustomElement` base classes and decorators, which _are_ bundled into your client) and a CLI (`elm-webcomponents`, used only at build time for code generation).
+
+### 2. Author your components
+
+Put your annotated component files somewhere your bundler will include them (e.g. import them from your entry point so they get registered). We recommend keeping them in a dedicated directory — say `src/components/` — because the code generator globs over them.
+
+### 3. Wire up code generation
+
+Run the CLI over your component files, pointing `-o` at an output directory for the generated Elm:
+
+```sh
+elm-webcomponents -o generated/elm src/components/*.ts
+```
+
+The generated modules are meant to be committed-or-regenerated, not hand-edited. It's convenient to run this as part of your existing codegen step, and to format the output afterwards:
+
+```jsonc
+// package.json
+{
+  "scripts": {
+    "codegen": "elm-webcomponents -o generated/elm src/components/*.ts && elm-format generated/elm --yes",
+  },
+}
+```
+
+> [!TIP]
+> The CLI does not create the output directory for you, so make sure it exists (e.g. commit a `.gitkeep`, or `mkdir -p` first).
+
+### 4. Tell Elm about the generated modules
+
+By default the generated modules use **flat module names** (e.g. `SizeObserver`, not `Components.SizeObserver`). Elm requires a module's name to match its path _relative to a source directory_, so the output directory must itself be a source directory. Add it to your `elm.json`:
+
+```jsonc
+// elm.json
+{
+  "source-directories": [
+    "src",
+    "generated/elm", // <- the -o directory from step 3
+  ],
+}
+```
+
+If you'd rather namespace the generated modules under an existing source directory, pass `--module-prefix` (short `-p`). For example, `elm-webcomponents -o src --module-prefix Components src/components/*.ts` emits `module Components.SizeObserver` into `src/Components/SizeObserver.elm`, so no extra source directory is needed — just make sure the prefix directory sits inside one you already list.
+
+If you use `elm-review`, you'll also want to exclude the generated directory, since the output isn't meant to satisfy every lint (e.g. it may import `Json.Encode` even for a component that only has events):
+
+```elm
+-- review/src/ReviewConfig.elm
+config =
+    [ {- your rules -} ]
+        |> List.map (Review.Rule.ignoreErrorsForDirectories [ "generated/elm" ])
+```
+
+### 5. Make your bundler transform the decorators
+
+This library uses **standard (TC39) decorators** and the `accessor` keyword. Your bundler must down-level these to something browsers run today — and **not every bundler does**. Two things to watch for:
+
+- **TypeScript config:** you _must not_ enable `experimentalDecorators` (that opts into the old, incompatible decorator semantics). Leave it off. See the [Compatibility](#typescript) section below.
+- **The bundler's transformer:** some transformers pass standard decorators through untouched, which then throw in the browser.
+
+`esbuild` (and therefore the default Vite pipeline in most setups) lowers standard decorators correctly when targeting `es2022` or similar — nothing extra is needed there.
+
+> [!WARNING]
+> **Vite 8 / Rolldown and `@vitejs/plugin-react` use `oxc`, which (as of writing) does _not_ lower standard decorators** — it only supports the legacy flavor. If your components render but you see raw `@component(...)`/`accessor` in the served/built output, or a `SyntaxError` in the browser, this is why. Setting `esbuild.target` in your Vite config does _not_ help, because `oxc`/`plugin-react` handles `.ts` before esbuild ever runs.
+>
+> The fix is a small `enforce: "pre"` plugin that runs `esbuild` on your component files _before_ the oxc transform sees them:
+>
+> ```ts
+> // vite.config.ts
+> import { transform } from "esbuild";
+>
+> const ewcDecorators = () => ({
+>   name: "ewc-decorators",
+>   enforce: "pre" as const,
+>   async transform(code: string, id: string) {
+>     // scope this to wherever your annotated components live
+>     if (!/\/components\/.*\.ts$/.test(id)) return null;
+>     const result = await transform(code, {
+>       loader: "ts",
+>       target: "es2022",
+>       sourcefile: id,
+>       sourcemap: true,
+>     });
+>     return { code: result.code, map: result.map };
+>   },
+> });
+>
+> export default defineConfig({
+>   plugins: [ewcDecorators() /* , react(), ... */],
+> });
+> ```
+>
+> Keep the file filter tight (only your component directory) so you don't double-transform the rest of your app.
+
+### 6. Register and use
+
+Import your component files from your entry point so the `@component` decorator runs and registers the custom elements:
+
+```ts
+// index.ts
+import "./components/size-observer";
+```
+
+Then use the generated Elm module as shown throughout this README. If you use the [Shadow DOM style-piercing](#problems-of-shadow-dom-and-style-piercing) approach, also make sure your stylesheet is imported as a constructed stylesheet as described there.
+
 ## Compatibility
 
 ### TypeScript
@@ -441,11 +566,122 @@ Most of the web component APIs are well supported cross browser. `adoptedStyles`
 
 This codebase works by translating a subset of TypeScript types into Elm types/encoders/decoders.
 
-We don't currently support any form of encoding for custom types on the Elm side, meaning type unions in TypeScript won't work.
+Some TypeScript objects can't meaningfully interop with Elm. Generally this means anything that isn't fundamentally composed of primitives, arrays and POJOs (Plain Old JavaScript Object). Think JSON data model. This means that _Classes_ are not supported, nor any built-in classes such as `RegExp` or `Date`, neither with any _Functions_ work, nor any more exotic objects such as `Float32Array` or `Promise`.
 
-We plan to address this in the future. Some more advanced TS type shenanigans will also not work, such as Indexed types and similar. The best supported are things where there is a clear correspondence between Elm and TypeScript types.
+This is a pretty fundamental limitation of how Elm works, so this is unlikely to change in the future. The following limitations are more temporary, due to implementation difficulty (but we intend to get these to work eventually, albeit perhaps with limitations of their own):
 
-Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
+Union types are supported with the following limitations:
+
+- They must be declared inside a `type` alias; anonymous unions are not supported (as we'd need a name for them in Elm).
+
+  Therefore the following won't work:
+
+  ```ts
+  type shape = {
+    name: string;
+    kind: "square" | "triangle";
+  };
+  ```
+
+  but the following will:
+
+  ```ts
+  type shape =
+    | {
+        name: string;
+        kind: "square";
+      }
+    | {
+        name: string;
+        kind: "triangle";
+      };
+  ```
+
+  even though in some sense they are the identical type in TS and will generate in Elm:
+
+  ```elm
+  type Shape
+      = Square { name : String }
+      | Triangle { name : String }
+  ```
+
+- Each member of the union must be either a _string literal type_ or an object type with exactly one string literal property.
+
+  Therefore,
+
+  ```ts
+  type Color = "red" | "green" | "blue" | { tag: "Custom"; rgb: string };
+  ```
+
+  will work, but
+
+  ```ts
+  type Broken = 3 | { tag: "foo"; type: "foo" } | string;
+  ```
+
+  won't.
+
+- There is special case support for `undefined | someType`, which will be translated to `Maybe SomeType`. For this to work, you will need `strictNullChecks` enabled in your tsconfig.
+
+Intersection types are supported in an experimental and rudimentary way. Best avoided, but they may work.
+
+String-keyed dictionaries are supported: a `Record<string, X>` or an index signature `{ [key: string]: X }` is translated to an Elm `Dict String X` (with the corresponding `Json.Encode`/`Json.Decode` code). This only applies when the type has no named properties as well, since Elm dictionaries are homogeneous.
+
+Enums are supported and become an Elm custom type with one constructor per member (e.g. `enum Color { Red = "red", Green = "green" }` becomes `type Color = Red | Green`). String enums are encoded/decoded by their string value; numeric enums by their numeric value.
+
+Tuples are supported for 2 and 3 elements (e.g. `[string, number]` becomes `( String, Float )`), encoded as a positional JSON array. Elm has no tuples with 4 or more elements, so those are rejected — use a record instead.
+
+Template literal types with a single `string` or `number` placeholder are supported when declared as a named `type` (e.g. `type ItemId = \`item-${string}\``). Their representation depends on direction:
+
+- **Outbound** (a property you pass into the element): the type becomes an opaque Elm type (`type ItemId = ItemId String`) with a smart constructor that returns `Maybe`, rejecting strings that don't match the pattern (here, anything not starting with `item-`). This gives you validation at the point where you construct the value.
+- **Inbound** (a value handed back to you in an event payload): the type becomes a plain `String`. An opaque type would be useless here, since its constructor isn't exposed and you couldn't unwrap the value. (Inbound is also more lenient — anonymous and multi-placeholder template literals are accepted as `String`.)
+
+Anonymous (inline) template literals and multi-placeholder patterns are not supported in the outbound direction, since there'd be no name for the opaque type.
+
+By default `number` is encoded in Elm as `Float`. To generate an Elm `Int` instead, use the exported `Int` type, which is a [branded](https://egghead.io/blog/using-branded-types-in-typescript) `number` (it behaves like a `number` at runtime and in arithmetic, but the generator detects it and emits `Int` with `Encode.int` / `Decode.int`):
+
+```ts
+import { Int } from "elm-webcomponents";
+
+@component("counter-element")
+class Counter extends CustomElement<{}> {
+  @required
+  accessor count!: Int;
+
+  @required
+  accessor size!: { width: Int; height: Int };
+}
+```
+
+Because TypeScript has no distinct integer type, assigning a numeric literal to an `Int` may require a cast, e.g. `this.count = 5 as Int`. The `Int` brand is detected structurally, so it works anywhere a number can appear — nested in records, arrays, tuples, `Dict` values, and so on.
+
+### Custom Elm types
+
+`Int` is really a special case of a general mechanism: you can map any TypeScript type to an Elm type of your choosing with the `ElmType` brand. This lets you plug in Elm types the generator doesn't know about (e.g. `Time.Posix`). You supply the Elm type name, a decoder, an encoder, and the modules the snippets need:
+
+```ts
+import { ElmType, component, required, CustomElement } from "elm-webcomponents";
+
+type Posix = ElmType<
+  number, // the underlying (runtime) TypeScript type
+  "Time.Posix", // the Elm type expression
+  "Decode.map Time.millisToPosix Decode.int", // a complete `Decoder Time.Posix`
+  "\\p -> Encode.int (Time.posixToMillis p)", // a `Time.Posix -> Encode.Value` function
+  ["Time"] // modules the snippets reference
+>;
+
+@component("clock-element")
+class Clock extends CustomElement<{ requiredEvents: { fire: { at: Posix } } }> {
+  @required
+  accessor start!: Posix;
+}
+```
+
+Generates a module that `import Time`, types `start` as `Time.Posix`, encodes it with your function, and decodes the event payload with your decoder. Like `Int`, the brand is a runtime-transparent version of the underlying type (here `number`), is detected structurally so it works when nested, and its imports are collected and deduplicated across the module. Contract details:
+
+- The **decoder** must be a complete `Json.Decode.Decoder` expression for your Elm type (it is emitted verbatim). It's optional — omit it (or pass `""`) for a type that only flows *out* of Elm (a property). Using such a type in an event payload is then a generation error.
+- The **encoder** must be a function from your Elm type to `Json.Encode.Value` (the generator applies it to the value). It's optional in the same way, for a type that only flows *into* Elm (an event).
+- The **modules** field is a tuple of fully-qualified Elm module names (e.g. `["Time"]`); the generator emits `import <Module>` for each, so they're always imported unqualified (avoiding conflicting-alias problems between usages). `Json.Decode as Decode` and `Json.Encode as Encode` are always in scope. Omit the field (`[]`) if no extra modules are needed.
 
 ### Status
 

@@ -17,6 +17,16 @@ const app = command({
         return "./elm-webcomponents";
       },
     }),
+    modulePrefix: option({
+      type: string,
+      description:
+        "Optional dotted Elm module prefix for generated modules (e.g. 'Components' produces module Components.MyElement in Components/MyElement.elm)",
+      long: "module-prefix",
+      short: "p",
+      defaultValue() {
+        return "";
+      },
+    }),
     inputFiles: restPositionals({
       type: ExistingPath,
       description: "Typescript files containing webcomponents",
