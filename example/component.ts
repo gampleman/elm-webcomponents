@@ -41,8 +41,8 @@ class SizeObserver extends CustomElement<{
   @optional
   accessor debounce: number = 100;
 
-  #resizeObserver: ResizeObserver;
-  #timeout: NodeJS.Timeout | null = null;
+  #resizeObserver!: ResizeObserver;
+  #timeout: ReturnType<typeof setTimeout> | null = null;
   connectedCallback(): void {
     this.#resizeObserver = new ResizeObserver(() => {
       if (this.#timeout == null) {
@@ -84,7 +84,7 @@ class MyElement extends CustomElement<{
 
   /** Some comments */
   @required
-  accessor otherProp: Foo;
+  accessor otherProp!: Foo;
 
   render() {
     this.triggerEvent("Rendered", { foo: "bar" });
@@ -116,13 +116,13 @@ export class ReactyThing extends CustomElement<{
   extraAttributes: false;
   requiredEvents: { click: Value; change: Placeholder<string>[] };
 }> {
-  #root: Root;
+  #root!: Root;
 
   @required
-  accessor placeholders: Placeholder<string>[];
+  accessor placeholders!: Placeholder<string>[];
 
   @required
-  accessor disabled: Value;
+  accessor disabled!: Value;
 
   @optional
   accessor el: Placeholder<number> | undefined;
@@ -131,11 +131,11 @@ export class ReactyThing extends CustomElement<{
   accessor value: Placeholder<number> | undefined;
 
   @required
-  accessor test: { foo: string } & { bar: number };
+  accessor test!: { foo: string } & { bar: number };
 
   /** A dictionary of arbitrary string-keyed values. */
   @optional
-  accessor metadata: Record<string, string>;
+  accessor metadata!: Record<string, string>;
 
   init() {
     this.#root = {

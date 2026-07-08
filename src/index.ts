@@ -41,12 +41,27 @@ type ConfigBase = {
    * This will prevent adding class/id attributes to the element.
    * */
   extraAttributes?: boolean;
+
+  /**
+   * The name of the generated Elm view function. Defaults to `"view"`.
+   * Set this to a string literal to rename it (e.g. `"container"`).
+   * */
+  viewFnName?: string;
 };
+
+/**
+ * Constrains a config type to _exactly_ the keys of {@link ConfigBase}: any
+ * extra key (e.g. a typo like `htmlContnet`) is mapped to `never`, so it fails
+ * to satisfy the constraint. This turns silently-ignored config keys into
+ * compile errors. Used as an F-bounded constraint: `Config extends NoExcess<Config>`.
+ */
+type NoExcess<Config> = ConfigBase &
+  Record<Exclude<keyof Config, keyof ConfigBase>, never>;
 /**
  * Base class for defining custom elements.
  */
 export class CustomElement<
-  Config extends ConfigBase = {
+  Config extends NoExcess<Config> = {
     requiredEvents: {};
     optionalEvents: {};
     htmlContent: "none";
@@ -128,7 +143,7 @@ export const component =
     window.customElements.define(tagName, decorated);
   };
 
-function decorator<T extends ConfigBase, V>(
+function decorator<T extends NoExcess<T>, V>(
   access: any,
   context:
     | ClassAccessorDecoratorContext<CustomElement<T>, V>
@@ -173,7 +188,7 @@ export const required = decorator;
  *
  * @param options.updateAfterSet If set to false, the `update` method will not be called after the value is set.
  */
-export let lazy = <T extends ConfigBase, V>(
+export let lazy = <T extends NoExcess<T>, V>(
   ...args: Parameters<typeof decorator<T, V>>
 ): ReturnType<typeof decorator<T, V>> => {
   lazy = decorator;
@@ -207,7 +222,7 @@ export let lazy = <T extends ConfigBase, V>(
  * and includes some utilities for piercing it with styles.
  */
 export class IsolatedCustomElement<
-  T extends ConfigBase,
+  T extends NoExcess<T>,
 > extends CustomElement<T> {
   #updateTask = false;
 

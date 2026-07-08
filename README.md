@@ -133,7 +133,7 @@ import {
 @component("my-example")
 class MyExample extends CustomElement<{}> {
   @required
-  accessor foo: string;
+  accessor foo!: string;
 
   @optional
   accessor bar: bool = true;
@@ -160,7 +160,7 @@ These decorators can be applied to auto-accessors, setters and plain properties:
 @component("my-example")
 class MyExample extends CustomElement<{}> {
   @required
-  accessor foo: string;
+  accessor foo!: string;
 
   @required
   set bar(value: string) {
@@ -168,7 +168,7 @@ class MyExample extends CustomElement<{}> {
   }
 
   @required
-  baz: string;
+  baz!: string;
 }
 ```
 
@@ -255,10 +255,10 @@ import { component, required, optional } from "elm-webcomponents";
 @component("example-react")
 class MyComponent extends ReactCustomElement<{}> {
   @required
-  accessor someInput: string;
+  accessor someInput!: string;
 
-  @optiona
-  accessor someOtherInput: boolean;
+  @optional
+  accessor someOtherInput: boolean = false;
 
   render() {
     return (
