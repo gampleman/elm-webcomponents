@@ -1,5 +1,5 @@
 import * as ts from "typescript";
-import { toTypeCase, toValueCase } from "./utils";
+import { toTypeCase, toValueCase, enumInfo, tupleElements } from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 export type Type = {
@@ -99,7 +99,23 @@ export const buildType = (
     throw new TransformError(node, message);
   };
 
-  const todo = (name: string) => error(`Type ${name} not implemented`);
+  // A TypeScript `enum` arrives as a union of EnumLiteral members (not
+  // TypeFlags.Enum), so it is detected before the flag switch. It becomes an
+  // Elm custom type with one nullary constructor per member.
+  const enumType = enumInfo(type, checker);
+  if (enumType) {
+    const docs = buildDocs(
+      (type.aliasSymbol ?? type.symbol)!,
+      checker
+    );
+    const definition = `${docs}type ${enumType.name} = ${enumType.members
+      .map((member) => member.constructor)
+      .join(" | ")}`;
+    return {
+      expression: enumType.name,
+      definitions: new Map([[enumType.name + "(..)", definition]]),
+    };
+  }
 
   switch (type.flags) {
     case ts.TypeFlags.Any:
@@ -115,8 +131,8 @@ export const buildType = (
     case ts.TypeFlags.Boolean:
     case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
       return elm`Bool`;
-    case ts.TypeFlags.Enum:
-      return todo("Enum");
+    // Enums are handled by the enumInfo guard above; they never reach here with
+    // a bare TypeFlags.Enum, so there is no case for it.
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
@@ -153,6 +169,21 @@ export const buildType = (
           checker,
           node
         )})`;
+      }
+
+      // A TypeScript tuple maps to an Elm tuple. Elm only has 2- and 3-tuples,
+      // so other arities are rejected.
+      const tupleTypes = tupleElements(type, checker);
+      if (tupleTypes) {
+        if (tupleTypes.length < 2 || tupleTypes.length > 3) {
+          error(
+            `Tuples with ${tupleTypes.length} elements are not supported; Elm only has 2- and 3-element tuples (consider a record instead)`
+          );
+        }
+        return elm`( ${join(
+          tupleTypes.map((el) => buildType(el, checker, node)),
+          ", "
+        )} )`;
       }
 
       // A string index signature (`Record<string, X>` or `{ [key: string]: X }`)

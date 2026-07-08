@@ -627,6 +627,10 @@ Intersection types are supported in an experimental and rudimentary way. Best av
 
 String-keyed dictionaries are supported: a `Record<string, X>` or an index signature `{ [key: string]: X }` is translated to an Elm `Dict String X` (with the corresponding `Json.Encode`/`Json.Decode` code). This only applies when the type has no named properties as well, since Elm dictionaries are homogeneous.
 
+Enums are supported and become an Elm custom type with one constructor per member (e.g. `enum Color { Red = "red", Green = "green" }` becomes `type Color = Red | Green`). String enums are encoded/decoded by their string value; numeric enums by their numeric value.
+
+Tuples are supported for 2 and 3 elements (e.g. `[string, number]` becomes `( String, Float )`), encoded as a positional JSON array. Elm has no tuples with 4 or more elements, so those are rejected — use a record instead.
+
 Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
 
 ### Status

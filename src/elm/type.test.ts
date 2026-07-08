@@ -13,6 +13,9 @@ describe.each([
   ["Record<string, number>", "Dict String (Float)"],
   ["{ [key: string]: string }", "Dict String (String)"],
   ["Record<string, { x: number }>", "Dict String ({ x : Float })"],
+  ["[string, number]", "( String, Float )"],
+  ["[string, number, boolean]", "( String, Float, Bool )"],
+  ["[string, number[]]", "( String, List (Float) )"],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `
@@ -116,6 +119,18 @@ type alias Foo = { foo : String }`,
     "Foo",
     new Map(),
     "{ tag : String, value : Float, name : String }",
+  ],
+  [
+    `enum Foo { Red = "red", Green = "green" }`,
+    "Foo",
+    new Map([["Foo(..)", "type Foo = Red | Green"]]),
+    "Foo",
+  ],
+  [
+    `enum Foo { Red, Green, Blue }`,
+    "Foo",
+    new Map([["Foo(..)", "type Foo = Red | Green | Blue"]]),
+    "Foo",
   ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeDef, elmTypeRef) => {
   test("converts types correctly", () => {

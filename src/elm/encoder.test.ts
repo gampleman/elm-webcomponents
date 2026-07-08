@@ -21,6 +21,14 @@ describe.each([
     "Record<string, { x: number }>",
     `Encode.dict identity (\\v -> Encode.object [ ( "x", Encode.float v.x ) ]) value`,
   ],
+  [
+    "[string, number]",
+    `(\\( t0, t1 ) -> Encode.list identity [ Encode.string t0, Encode.float t1 ]) value`,
+  ],
+  [
+    "[string, number, boolean]",
+    `(\\( t0, t1, t2 ) -> Encode.list identity [ Encode.string t0, Encode.float t1, Encode.bool t2 ]) value`,
+  ],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `
@@ -100,6 +108,21 @@ describe.each([
     `type Foo = { tag: 'foo', value: number } & { name : string }`,
     "Foo",
     `Encode.object [ ( "tag", Encode.string "foo" ) , ( "value", Encode.float value.value ) , ( "name", Encode.string value.name ) ]`,
+  ],
+  [
+    `enum Foo { Red = "red", Green = "green" }`,
+    "Foo",
+    `case (value) of
+        Red -> Encode.string "red"
+        Green -> Encode.string "green"`,
+  ],
+  [
+    `enum Foo { Red, Green, Blue }`,
+    "Foo",
+    `case (value) of
+        Red -> Encode.int 0
+        Green -> Encode.int 1
+        Blue -> Encode.int 2`,
   ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {

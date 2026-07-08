@@ -28,6 +28,14 @@ describe.each([
     `Decode.dict (Decode.succeed (\\x -> { x = x })
       |> Decode.map2 (|>) (Decode.field "x" (Decode.float)))`,
   ],
+  [
+    "[string, number]",
+    `Decode.map2 (\\t0 t1 -> ( t0, t1 )) (Decode.index 0 (Decode.string)) (Decode.index 1 (Decode.float))`,
+  ],
+  [
+    "[string, number, boolean]",
+    `Decode.map3 (\\t0 t1 t2 -> ( t0, t1, t2 )) (Decode.index 0 (Decode.string)) (Decode.index 1 (Decode.float)) (Decode.index 2 (Decode.bool))`,
+  ],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `
@@ -112,6 +120,16 @@ describe.each([
       |> Decode.map2 (|>) (Decode.field "tag" (Decode.string |> Decode.andThen (\\str -> if str == "foo" then Decode.succeed str else Decode.fail "Expected foo")))
       |> Decode.map2 (|>) (Decode.field "value" (Decode.float))
       |> Decode.map2 (|>) (Decode.field "name" (Decode.string))`,
+  ],
+  [
+    `enum Foo { Red = "red", Green = "green" }`,
+    "Foo",
+    `Decode.string |> Decode.andThen (\\raw -> if raw == "red" then Decode.succeed Red else if raw == "green" then Decode.succeed Green else Decode.fail "Unexpected Foo")`,
+  ],
+  [
+    `enum Foo { Red, Green, Blue }`,
+    "Foo",
+    `Decode.int |> Decode.andThen (\\raw -> if raw == 0 then Decode.succeed Red else if raw == 1 then Decode.succeed Green else if raw == 2 then Decode.succeed Blue else Decode.fail "Unexpected Foo")`,
   ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {

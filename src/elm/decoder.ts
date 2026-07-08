@@ -1,5 +1,5 @@
 import * as ts from "typescript";
-import { toValueCase, toTypeCase, introduce } from "./utils";
+import { toValueCase, toTypeCase, introduce, enumInfo, tupleElements } from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
@@ -22,6 +22,26 @@ export const buildDecoder = (
     throw new TransformError(nodeFromType(type), message);
   };
 
+  // Enums (a union of EnumLiteral members) decode the underlying primitive and
+  // then map each serialized value to its Elm constructor, failing on anything
+  // unexpected. Emitted on a single line so it parses at any nesting depth.
+  const enumType = enumInfo(type, checker);
+  if (enumType) {
+    [variable, newScope] = introduce("raw", scope);
+    const primitive = enumType.isString ? "Decode.string" : "Decode.int";
+    const literal = (value: string | number) =>
+      enumType.isString ? `"${value}"` : `${value}`;
+    const branches = enumType.members
+      .map(
+        (member) =>
+          `if ${variable} == ${literal(member.value)} then Decode.succeed ${
+            member.constructor
+          } else `
+      )
+      .join("");
+    return `${primitive} |> Decode.andThen (\\${variable} -> ${branches}Decode.fail "Unexpected ${enumType.name}")`;
+  }
+
   switch (type.flags) {
     case ts.TypeFlags.Any:
       error("Any type is not supported: its shape is unknown so no decoder can be generated");
@@ -36,8 +56,7 @@ export const buildDecoder = (
     case ts.TypeFlags.Boolean:
     case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
       return `Decode.bool`;
-    case ts.TypeFlags.Enum:
-      return todo("Enum");
+    // Enums are handled by the enumInfo guard above.
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
@@ -75,6 +94,32 @@ export const buildDecoder = (
           scope
         )})`;
       }
+
+      // Tuples decode positionally from a JSON array via Decode.index.
+      const tupleTypes = tupleElements(type, checker);
+      if (tupleTypes) {
+        if (tupleTypes.length < 2 || tupleTypes.length > 3) {
+          error(
+            `Tuples with ${tupleTypes.length} elements are not supported; Elm only has 2- and 3-element tuples`
+          );
+        }
+        let tupleScope = scope;
+        const names = tupleTypes.map((_, i) => {
+          let name;
+          [name, tupleScope] = introduce(`t${i}`, tupleScope);
+          return name;
+        });
+        const fields = tupleTypes
+          .map(
+            (el, i) =>
+              `(Decode.index ${i} (${buildDecoder(el, checker, tupleScope)}))`
+          )
+          .join(" ");
+        return `Decode.map${tupleTypes.length} (\\${names.join(
+          " "
+        )} -> ( ${names.join(", ")} )) ${fields}`;
+      }
+
       const stringIndexType = checker.getIndexTypeOfType(
         type,
         ts.IndexKind.String

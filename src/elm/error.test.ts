@@ -87,3 +87,19 @@ describe("unsupported type reached through a library type", () => {
     });
   });
 });
+
+describe("tuples beyond Elm's arity", () => {
+  test.each([
+    ["[string, number, boolean, string]", 4],
+    ["[string]", 1],
+  ])("%s is rejected as unsupported", (tsType) => {
+    expect.assertions(1);
+    withType(tsType, (type, checker, node) => {
+      try {
+        buildType(type, checker, node);
+      } catch (e) {
+        expect(e).toBeInstanceOf(TransformError);
+      }
+    });
+  });
+});

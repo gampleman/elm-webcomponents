@@ -1,5 +1,5 @@
 import * as ts from "typescript";
-import { toValueCase, toTypeCase, introduce } from "./utils";
+import { toValueCase, toTypeCase, introduce, enumInfo, tupleElements } from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
@@ -28,6 +28,25 @@ export const buildEncoder = (
   const error = (message: string): never => {
     throw new TransformError(nodeFromType(type), message);
   };
+
+  // Enums (a union of EnumLiteral members) encode as a `case` mapping each Elm
+  // constructor to its serialized value: a string for string enums, the ordinal
+  // for numeric enums.
+  const enumType = enumInfo(type, checker);
+  if (enumType) {
+    return `case (${value}) of
+${enumType.members
+  .map(
+    (member) =>
+      `${branchIndent}${member.constructor} -> ${
+        enumType.isString
+          ? `Encode.string "${member.value}"`
+          : `Encode.int ${member.value}`
+      }`
+  )
+  .join("\n")}`;
+  }
+
   switch (type.flags) {
     case ts.TypeFlags.Any:
       error("Any type is not supported: its shape is unknown so no encoder can be generated");
@@ -42,8 +61,7 @@ export const buildEncoder = (
     case ts.TypeFlags.Boolean:
     case ts.TypeFlags.Boolean | ts.TypeFlags.Union:
       return `Encode.bool ${value}`;
-    case ts.TypeFlags.Enum:
-      return todo("Enum");
+    // Enums are handled by the enumInfo guard above.
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
@@ -81,6 +99,30 @@ export const buildEncoder = (
           newScope,
           indent + INDENT_STEP
         )}) ${value}`;
+      }
+
+      // Tuples encode as a positional JSON array. We destructure with an
+      // immediately-applied lambda (no `case`, so it parses at any nesting depth).
+      const tupleTypes = tupleElements(type, checker);
+      if (tupleTypes) {
+        if (tupleTypes.length < 2 || tupleTypes.length > 3) {
+          error(
+            `Tuples with ${tupleTypes.length} elements are not supported; Elm only has 2- and 3-element tuples`
+          );
+        }
+        let tupleScope = scope;
+        const names = tupleTypes.map((_, i) => {
+          let name;
+          [name, tupleScope] = introduce(`t${i}`, tupleScope);
+          return name;
+        });
+        const encoded = tupleTypes
+          .map(
+            (el, i) =>
+              buildEncoder(el, names[i], checker, tupleScope, indent + INDENT_STEP)
+          )
+          .join(", ");
+        return `(\\( ${names.join(", ")} ) -> Encode.list identity [ ${encoded} ]) ${value}`;
       }
 
       const stringIndexType = checker.getIndexTypeOfType(
