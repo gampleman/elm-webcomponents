@@ -631,7 +631,29 @@ Enums are supported and become an Elm custom type with one constructor per membe
 
 Tuples are supported for 2 and 3 elements (e.g. `[string, number]` becomes `( String, Float )`), encoded as a positional JSON array. Elm has no tuples with 4 or more elements, so those are rejected — use a record instead.
 
-Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
+Template literal types with a single `string` or `number` placeholder are supported when declared as a named `type` (e.g. `type ItemId = \`item-${string}\``). Their representation depends on direction:
+
+- **Outbound** (a property you pass into the element): the type becomes an opaque Elm type (`type ItemId = ItemId String`) with a smart constructor that returns `Maybe`, rejecting strings that don't match the pattern (here, anything not starting with `item-`). This gives you validation at the point where you construct the value.
+- **Inbound** (a value handed back to you in an event payload): the type becomes a plain `String`. An opaque type would be useless here, since its constructor isn't exposed and you couldn't unwrap the value. (Inbound is also more lenient — anonymous and multi-placeholder template literals are accepted as `String`.)
+
+Anonymous (inline) template literals and multi-placeholder patterns are not supported in the outbound direction, since there'd be no name for the opaque type.
+
+By default `number` is encoded in Elm as `Float`. To generate an Elm `Int` instead, use the exported `Int` type, which is a [branded](https://egghead.io/blog/using-branded-types-in-typescript) `number` (it behaves like a `number` at runtime and in arithmetic, but the generator detects it and emits `Int` with `Encode.int` / `Decode.int`):
+
+```ts
+import { Int } from "elm-webcomponents";
+
+@component("counter-element")
+class Counter extends CustomElement<{}> {
+  @required
+  accessor count!: Int;
+
+  @required
+  accessor size!: { width: Int; height: Int };
+}
+```
+
+Because TypeScript has no distinct integer type, assigning a numeric literal to an `Int` may require a cast, e.g. `this.count = 5 as Int`. The `Int` brand is detected structurally, so it works anywhere a number can appear — nested in records, arrays, tuples, `Dict` values, and so on.
 
 ### Status
 

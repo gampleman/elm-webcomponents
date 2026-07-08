@@ -1,5 +1,14 @@
 import * as ts from "typescript";
-import { toValueCase, toTypeCase, introduce, enumInfo, tupleElements } from "./utils";
+import {
+  toValueCase,
+  toTypeCase,
+  introduce,
+  enumInfo,
+  tupleElements,
+  templateLiteralInfo,
+  propertyTypeNode,
+  isElmInt,
+} from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
@@ -21,13 +30,30 @@ export const buildEncoder = (
   value: string,
   checker: ts.TypeChecker,
   scope: Map<string, number>,
-  indent = 8
+  indent = 8,
+  node?: ts.Node
 ): string => {
   let variable, newScope;
   const branchIndent = " ".repeat(indent);
   const error = (message: string): never => {
-    throw new TransformError(nodeFromType(type), message);
+    throw new TransformError(node ?? nodeFromType(type), message);
   };
+
+  // The branded `Int` type presents as an intersection, so it must be handled
+  // before the Intersection→object case that would treat it as a record.
+  if (isElmInt(type, checker)) {
+    return `Encode.int ${value}`;
+  }
+
+  // A template literal type is an opaque newtype wrapping a String, so it
+  // encodes by unwrapping the constructor and encoding the raw string.
+  const templateLiteral = templateLiteralInfo(type, checker, node);
+  if (templateLiteral) {
+    if (!templateLiteral.supported) {
+      return error(templateLiteral.reason);
+    }
+    return `(\\(${templateLiteral.name} raw) -> Encode.string raw) ${value}`;
+  }
 
   // Enums (a union of EnumLiteral members) encode as a `case` mapping each Elm
   // constructor to its serialized value: a string for string enums, the ordinal
@@ -38,7 +64,7 @@ export const buildEncoder = (
 ${enumType.members
   .map(
     (member) =>
-      `${branchIndent}${member.constructor} -> ${
+      `${branchIndent}${member.ctor} -> ${
         enumType.isString
           ? `Encode.string "${member.value}"`
           : `Encode.int ${member.value}`
@@ -149,7 +175,8 @@ ${enumType.members
               `${value}.${toValueCase(prop.getName())}`,
               checker,
               scope,
-              indent
+              indent,
+              propertyTypeNode(prop)
             )} )`
         )
         .join(" , ")} ]`;
@@ -222,7 +249,8 @@ ${branchIndent}${refType.types
               `${value}.${toValueCase(prop.getName())}`,
               checker,
               scope,
-              indent
+              indent,
+              propertyTypeNode(prop)
             )} )`
         )
         .join(" , ")} ]`;

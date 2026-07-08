@@ -103,3 +103,18 @@ describe("tuples beyond Elm's arity", () => {
     });
   });
 });
+
+describe("anonymous template literals", () => {
+  test("an inline template literal (no named alias) is rejected", () => {
+    expect.assertions(1);
+    // Inline `${...}` types have no name to give the opaque Elm newtype, so
+    // even with the reference node they cannot be supported.
+    withType("`item-${string}`", (type, checker, node) => {
+      try {
+        buildType(type, checker, node);
+      } catch (e) {
+        expect(e).toBeInstanceOf(TransformError);
+      }
+    });
+  });
+});

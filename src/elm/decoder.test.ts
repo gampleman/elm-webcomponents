@@ -131,6 +131,19 @@ describe.each([
     "Foo",
     `Decode.int |> Decode.andThen (\\raw -> if raw == 0 then Decode.succeed Red else if raw == 1 then Decode.succeed Green else if raw == 2 then Decode.succeed Blue else Decode.fail "Unexpected Foo")`,
   ],
+  [
+    `type Int = number & { readonly __elmInt__?: never }`,
+    "Int",
+    `Decode.int`,
+  ],
+  [
+    `type Int = number & { readonly __elmInt__?: never };
+     type Point = { x: Int; y: number }`,
+    "Point",
+    `Decode.succeed (\\x y -> { x = x, y = y })
+      |> Decode.map2 (|>) (Decode.field "x" (Decode.int))
+      |> Decode.map2 (|>) (Decode.field "y" (Decode.float))`,
+  ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {
     const source = `
@@ -155,6 +168,40 @@ describe.each([
         (stmt as ts.VariableDeclaration).type!
       );
       const elmType = buildDecoder(type, checker, new Map());
+      expect(elmType).toEqual(elmTypeRef);
+    });
+    expect.assertions(1);
+  });
+});
+
+// Template literals are decoded as a plain String: decoders only run inbound,
+// where an opaque newtype (whose constructor is not exposed) would be useless.
+describe.each([
+  ["type Foo = `item-${string}`", "Foo", "Decode.string"],
+  ["type Foo = `${number}px`", "Foo", "Decode.string"],
+])("template literal %s decodes", (tsTypeDef, tsTypeRef, elmTypeRef) => {
+  test("as a plain String", () => {
+    const source = `
+    ${tsTypeDef};
+
+    let target : ${tsTypeRef};
+    `;
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+      if (fileName == "input.ts") {
+        return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest);
+      }
+      return orig(fileName, ...args);
+    };
+
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
+    const checker = program.getTypeChecker();
+    const ast = program.getSourceFile("input.ts")!;
+    query(ast, "VariableDeclaration").forEach((stmt) => {
+      const node = (stmt as ts.VariableDeclaration).type!;
+      const type = checker.getTypeAtLocation(node);
+      const elmType = buildDecoder(type, checker, new Map(), false, node);
       expect(elmType).toEqual(elmTypeRef);
     });
     expect.assertions(1);

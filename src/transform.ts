@@ -37,11 +37,23 @@ function extractEventsFromTypeVar(
         prop,
         prop.valueDeclaration!
       );
+      const declaration = prop.getDeclarations()![0];
+      // The type-reference node (e.g. the `Foo` in `event: Foo`) carries the
+      // alias name for template-literal types, which the type itself drops.
+      const node =
+        (ts.isPropertySignature(declaration) ||
+          ts.isPropertyDeclaration(declaration)) &&
+        declaration.type
+          ? declaration.type
+          : declaration;
       return {
         name: prop.getName(),
         comment: ts.displayPartsToString(prop.getDocumentationComment(checker)),
         type,
-        elmType: buildType(type, checker, prop.getDeclarations()![0]),
+        node,
+        // Events flow into Elm (decoded), so template literals in the payload
+        // become plain Strings rather than opaque, unusable newtypes.
+        elmType: buildType(type, checker, node, false, true),
       };
     });
 }
@@ -264,6 +276,7 @@ export const transform = (
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
                   elmType: buildType(type, checker, targetNode),
                 });
               } else if (lazyDecorator) {
@@ -271,6 +284,7 @@ export const transform = (
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
                   elmType: buildType(type, checker, targetNode),
                 });
               } else if (optionalDecorator) {
@@ -278,6 +292,7 @@ export const transform = (
                   name: propertyNode.name.getText(),
                   comment,
                   type,
+                  node: targetNode,
                   elmType: buildType(type, checker, targetNode),
                 });
               }
@@ -362,7 +377,14 @@ export const main = ({
   }
 };
 
-type Attr = { name: string; comment: string; type: ts.Type; elmType: ElmType };
+type Attr = {
+  name: string;
+  comment: string;
+  type: ts.Type;
+  /** The type-reference node, used to recover alias names TypeScript drops (e.g. template literals). */
+  node: ts.Node;
+  elmType: ElmType;
+};
 
 type AttrList = { optional: Attr[]; required: Attr[] };
 
@@ -485,6 +507,11 @@ const formatElmFile = (info: OutputInfo) => {
     // `val` is the parameter name for optional-property and lazy setters, so it
     // must be reserved to stop nested encoders (e.g. the Maybe branch) shadowing it.
     "val",
+    // Module-level generated names (opaque types and their smart constructors,
+    // enum/union types) must be reserved so decoder lambda parameters rename
+    // around them rather than shadowing (e.g. a `size` field vs. a `size`
+    // smart constructor). Strip the `(..)` exposing suffix some keys carry.
+    ...[...info.typeDefs.keys()].map((key) => key.replace(/\(\.\.\)$/, "")),
   ];
   const scope = buildScope(scopeNames);
 
@@ -530,7 +557,9 @@ ${toValueCase(oa.name)} val =
         oa.type,
         "val",
         info.checker,
-        scope
+        scope,
+        8,
+        oa.node
       )})
 `
   )
@@ -547,7 +576,9 @@ ${toValueCase(`on ${oa.name}`)} tagger =
       Html.Events.on "${oa.name}" (Decode.map tagger (Decode.field "detail" (${buildDecoder(
         oa.type,
         info.checker,
-        scope
+        scope,
+        false,
+        oa.node
       )})))
   `
   )
@@ -592,7 +623,9 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
           ra.type,
           `req.${toValueCase(ra.name)}`,
           info.checker,
-          scope
+          scope,
+          8,
+          ra.node
         )})`
     )
     .concat(
@@ -603,7 +636,9 @@ ${info.viewFnName} ${info.attributesArg ? "attrs " : ""}${
           )} (Decode.field "detail" (${buildDecoder(
             re.type,
             info.checker,
-            scope
+            scope,
+            false,
+            re.node
           )})))
       `
       )
@@ -634,7 +669,9 @@ ${toValueCase(la.name)}ValueSetter val =
         la.type,
         "val",
         info.checker,
-        scope
+        scope,
+        8,
+        la.node
       )})] []
 `
   )

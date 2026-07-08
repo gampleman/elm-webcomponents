@@ -1,5 +1,14 @@
 import * as ts from "typescript";
-import { toValueCase, toTypeCase, introduce, enumInfo, tupleElements } from "./utils";
+import {
+  toValueCase,
+  toTypeCase,
+  introduce,
+  enumInfo,
+  tupleElements,
+  templateLiteralInfo,
+  propertyTypeNode,
+  isElmInt,
+} from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
@@ -11,7 +20,8 @@ export const buildDecoder = (
   type: ts.Type,
   checker: ts.TypeChecker,
   scope: Map<string, number>,
-  omitLiterals = false
+  omitLiterals = false,
+  node?: ts.Node
 ): string => {
   let variable: string, newScope: Map<string, number>;
   //reusable variable declarations
@@ -19,8 +29,22 @@ export const buildDecoder = (
   let propNames: string[];
 
   const error = (message: string): never => {
-    throw new TransformError(nodeFromType(type), message);
+    throw new TransformError(node ?? nodeFromType(type), message);
   };
+
+  // The branded `Int` type presents as an intersection, so it must be handled
+  // before the Intersection→record case that would treat it as an object.
+  if (isElmInt(type, checker)) {
+    return `Decode.int`;
+  }
+
+  // A template literal type is always decoded as a plain String: decoders only
+  // run on inbound (event) values, and an opaque newtype would be useless to the
+  // user since its constructor is not exposed. buildType renders these as
+  // `String` in the inbound direction, so the two stay in sync.
+  if (templateLiteralInfo(type, checker, node)) {
+    return `Decode.string`;
+  }
 
   // Enums (a union of EnumLiteral members) decode the underlying primitive and
   // then map each serialized value to its Elm constructor, failing on anything
@@ -35,7 +59,7 @@ export const buildDecoder = (
       .map(
         (member) =>
           `if ${variable} == ${literal(member.value)} then Decode.succeed ${
-            member.constructor
+            member.ctor
           } else `
       )
       .join("");
@@ -159,7 +183,9 @@ export const buildDecoder = (
             `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" (${buildDecoder(
               checker.getTypeOfSymbol(prop),
               checker,
-              newScope
+              newScope,
+              false,
+              propertyTypeNode(prop)
             )}))`
         )
         .join("\n      ")}`;
@@ -219,7 +245,9 @@ export const buildDecoder = (
             `|> Decode.map2 (|>) (Decode.field "${prop.getName()}" (${buildDecoder(
               checker.getTypeOfSymbol(prop),
               checker,
-              scope
+              scope,
+              false,
+              propertyTypeNode(prop)
             )}))`
         )
         .join("\n      ")}`;

@@ -1,5 +1,13 @@
 import * as ts from "typescript";
-import { toTypeCase, toValueCase, enumInfo, tupleElements } from "./utils";
+import {
+  toTypeCase,
+  toValueCase,
+  enumInfo,
+  tupleElements,
+  templateLiteralInfo,
+  propertyTypeNode,
+  isElmInt,
+} from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 export type Type = {
@@ -47,7 +55,8 @@ const buildObjectDefinition = (
   type: ts.Type,
   checker: ts.TypeChecker,
   lastNode: ts.Node,
-  filterOutLiterals: boolean
+  filterOutLiterals: boolean,
+  inbound = false
 ): Type => {
   return elm`{ ${join(
     checker
@@ -61,8 +70,12 @@ const buildObjectDefinition = (
         return elm`${toValueCase(prop.getName())} : ${buildType(
           checker.getTypeAtLocation(prop.valueDeclaration!),
           checker,
-          lastNode,
-          false
+          // Prefer the property's own type-reference node so nested types that
+          // rely on their reference site (e.g. template literals) resolve their
+          // name; fall back to the enclosing node otherwise.
+          propertyTypeNode(prop) ?? lastNode,
+          false,
+          inbound
         )}`;
       }),
     ", "
@@ -88,7 +101,12 @@ export const buildType = (
   type: ts.Type,
   checker: ts.TypeChecker,
   lastNode: ts.Node,
-  filterOutLiterals = false
+  filterOutLiterals = false,
+  // When the value flows *into* Elm (an event payload we decode) rather than
+  // out of it, template literal types become a plain `String`: the opaque
+  // newtype's constructor is not exposed, so a decoded opaque value would be
+  // useless to the user. Outbound (property) values keep the validating newtype.
+  inbound = false
 ): Type => {
   // Blame the type's own declaration when it lives in the user's code,
   // otherwise fall back to the referencing node so errors never point into
@@ -98,6 +116,12 @@ export const buildType = (
   const error = (message: string): never => {
     throw new TransformError(node, message);
   };
+
+  // The branded `Int` type presents as an intersection (number & brand), so it
+  // is detected before both the flag switch and the Intersection→record case.
+  if (isElmInt(type, checker)) {
+    return elm`Int`;
+  }
 
   // A TypeScript `enum` arrives as a union of EnumLiteral members (not
   // TypeFlags.Enum), so it is detected before the flag switch. It becomes an
@@ -109,11 +133,46 @@ export const buildType = (
       checker
     );
     const definition = `${docs}type ${enumType.name} = ${enumType.members
-      .map((member) => member.constructor)
+      .map((member) => member.ctor)
       .join(" | ")}`;
     return {
       expression: enumType.name,
       definitions: new Map([[enumType.name + "(..)", definition]]),
+    };
+  }
+
+  // A template literal type (e.g. `` `item-${string}` ``) becomes an opaque Elm
+  // newtype guarded by a smart constructor that rejects non-matching strings.
+  // The type is exposed opaquely (no `(..)`), alongside its constructor.
+  const templateLiteral = templateLiteralInfo(type, checker, lastNode);
+  if (templateLiteral) {
+    // Inbound: the user receives the value but can't unwrap an opaque type, so
+    // hand them a plain String (matching the decoder, which decodes a String).
+    // Any template literal is a string at runtime, so this works regardless of
+    // whether the outbound opaque-newtype form would be supported.
+    if (inbound) {
+      return elm`String`;
+    }
+    if (!templateLiteral.supported) {
+      return error(templateLiteral.reason);
+    }
+    const { name, ctor, pattern, validator } = templateLiteral;
+    const typeDef = `type ${name}
+    = ${name} String`;
+    const ctorDef = `{-| Build a \`${name}\` from a \`String\`, returning \`Nothing\` if it does not match the TypeScript type ${pattern}. -}
+${ctor} : String -> Maybe ${name}
+${ctor} raw =
+    if ${validator} then
+        Just (${name} raw)
+
+    else
+        Nothing`;
+    return {
+      expression: name,
+      definitions: new Map([
+        [name, typeDef],
+        [ctor, ctorDef],
+      ]),
     };
   }
 
@@ -167,7 +226,9 @@ export const buildType = (
         return elm`List (${buildType(
           checker.getTypeArguments(type as ts.TypeReference)[0],
           checker,
-          node
+          node,
+          false,
+          inbound
         )})`;
       }
 
@@ -181,7 +242,7 @@ export const buildType = (
           );
         }
         return elm`( ${join(
-          tupleTypes.map((el) => buildType(el, checker, node)),
+          tupleTypes.map((el) => buildType(el, checker, node, false, inbound)),
           ", "
         )} )`;
       }
@@ -194,13 +255,19 @@ export const buildType = (
         ts.IndexKind.String
       );
       if (stringIndexType && checker.getPropertiesOfType(type).length === 0) {
-        return elm`Dict String (${buildType(stringIndexType, checker, node)})`;
+        return elm`Dict String (${buildType(
+          stringIndexType,
+          checker,
+          node,
+          false,
+          inbound
+        )})`;
       }
 
       if (type.aliasSymbol) {
         const args =
           type.aliasTypeArguments?.map((arg) =>
-            buildType(arg, checker, node)
+            buildType(arg, checker, node, false, inbound)
           ) ?? [];
 
         let refType = checker.getDeclaredTypeOfSymbol(type.aliasSymbol);
@@ -219,7 +286,8 @@ export const buildType = (
           refType,
           checker,
           node,
-          filterOutLiterals
+          filterOutLiterals,
+          inbound
         )}`;
 
         let begin = {
@@ -242,7 +310,8 @@ export const buildType = (
             type,
             checker,
             node,
-            filterOutLiterals
+            filterOutLiterals,
+            inbound
           )}`;
           return {
             expression: type.symbol.name,
@@ -254,7 +323,9 @@ export const buildType = (
         case ts.ObjectFlags.Reference:
           const t = type as ts.TypeReference;
           const args =
-            t.typeArguments?.map((arg) => buildType(arg, checker, node)) ?? [];
+            t.typeArguments?.map((arg) =>
+              buildType(arg, checker, node, false, inbound)
+            ) ?? [];
 
           ref = elm`${buildDocs(
             t.target.symbol,
@@ -270,7 +341,8 @@ export const buildType = (
             t.target,
             checker,
             node,
-            filterOutLiterals
+            filterOutLiterals,
+            inbound
           )}`;
 
           let begin = {
@@ -285,7 +357,13 @@ export const buildType = (
         case ts.ObjectFlags.ArrayLiteral:
           console.log("isArrray");
       }
-      return buildObjectDefinition(type, checker, node, filterOutLiterals);
+      return buildObjectDefinition(
+        type,
+        checker,
+        node,
+        filterOutLiterals,
+        inbound
+      );
 
     case ts.TypeFlags.Union:
       if (type.aliasSymbol) {
@@ -325,7 +403,7 @@ export const buildType = (
                       )!
                   )
                   .find((ts) => ts.isStringLiteral())?.value ?? ""
-              )} (${buildType(t, checker, node, true)})`;
+              )} (${buildType(t, checker, node, true, inbound)})`;
             }),
             " | "
           )}`;
@@ -347,13 +425,19 @@ export const buildType = (
           const subtype = t.types.find(
             (t) => t.flags !== ts.TypeFlags.Undefined
           );
-          return elm`Maybe (${buildType(subtype!, checker, node)})`;
+          return elm`Maybe (${buildType(
+            subtype!,
+            checker,
+            node,
+            false,
+            inbound
+          )})`;
         }
         error("Anonymous union types not supported");
       }
 
     case ts.TypeFlags.Intersection:
-      return buildObjectDefinition(type, checker, node, false);
+      return buildObjectDefinition(type, checker, node, false, inbound);
 
     // case ts.TypeFlags.Index:
     //   // TODO: ???

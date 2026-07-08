@@ -1,4 +1,21 @@
 /**
+ * Marks a `number` that should be generated as an Elm `Int` rather than a
+ * `Float`. TypeScript has no distinct integer type, so this is a branded
+ * `number`: it behaves like a `number` at runtime and in arithmetic, but the
+ * code generator detects the brand and emits `Int` (with `Encode.int` /
+ * `Decode.int`).
+ *
+ * Assigning a numeric literal may require a cast, e.g. `this.count = 5 as Int`.
+ *
+ * @example
+ * ```ts
+ * @required accessor count!: Int;
+ * @required accessor size!: { width: Int; height: Int };
+ * ```
+ */
+export type Int = number & { readonly __elmInt__?: never };
+
+/**
  * Defines how the in Elm the child nodes are going to be passed in.
  */
 export type HtmlContent =

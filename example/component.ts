@@ -6,13 +6,12 @@ import {
   CustomElement,
   IsolatedCustomElement,
   type HtmlContent,
+  type Int,
 } from "../src";
 
 import { Foo } from "./related";
 
 import style from "./app/styles";
-
-type Int = number;
 
 // interface Foo {
 //   /** bar comment */
@@ -28,6 +27,8 @@ interface Box {
   height: number;
 }
 
+type Size = `${number}px`;
+
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
 class SizeObserver extends CustomElement<{
@@ -39,7 +40,7 @@ class SizeObserver extends CustomElement<{
 }> {
   /** Number of milliseconds to debounce.  */
   @optional
-  accessor debounce: number = 100;
+  accessor debounce: Int = 100 as Int;
 
   #resizeObserver!: ResizeObserver;
   #timeout: ReturnType<typeof setTimeout> | null = null;
@@ -72,7 +73,7 @@ class SizeObserver extends CustomElement<{
 class MyElement extends CustomElement<{
   optionalEvents: {
     /** foo comment */
-    Rendered: { foo: string };
+    Rendered: { foo: string; size: Size };
   };
   htmlContent: {
     header: { mode: "single" };
@@ -86,8 +87,11 @@ class MyElement extends CustomElement<{
   @required
   accessor otherProp!: Foo;
 
+  @required
+  accessor size!: Size;
+
   render() {
-    this.triggerEvent("Rendered", { foo: "bar" });
+    this.triggerEvent("Rendered", { foo: "bar", size: this.size });
     console.log("rendered");
   }
 }

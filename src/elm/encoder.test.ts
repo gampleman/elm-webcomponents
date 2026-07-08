@@ -124,6 +124,17 @@ describe.each([
         Green -> Encode.int 1
         Blue -> Encode.int 2`,
   ],
+  [
+    `type Int = number & { readonly __elmInt__?: never }`,
+    "Int",
+    `Encode.int value`,
+  ],
+  [
+    `type Int = number & { readonly __elmInt__?: never };
+     type Point = { x: Int; y: number }`,
+    "Point",
+    `Encode.object [ ( "x", Encode.int value.x ) , ( "y", Encode.float value.y ) ]`,
+  ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {
     const source = `
@@ -148,6 +159,43 @@ describe.each([
         (stmt as ts.VariableDeclaration).type!
       );
       const elmType = buildEncoder(type, "value", checker, new Map());
+      expect(elmType).toEqual(elmTypeRef);
+    });
+    expect.assertions(1);
+  });
+});
+
+// Template literals encode by unwrapping the opaque newtype. They need the
+// reference node to recover the alias name (the constructor to destructure).
+describe.each([
+  [
+    "type Foo = `item-${string}`",
+    "Foo",
+    `(\\(Foo raw) -> Encode.string raw) value`,
+  ],
+])("template literal %s encodes", (tsTypeDef, tsTypeRef, elmTypeRef) => {
+  test("by unwrapping the opaque newtype", () => {
+    const source = `
+    ${tsTypeDef};
+
+    let target : ${tsTypeRef};
+    `;
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+      if (fileName == "input.ts") {
+        return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest);
+      }
+      return orig(fileName, ...args);
+    };
+
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
+    const checker = program.getTypeChecker();
+    const ast = program.getSourceFile("input.ts")!;
+    query(ast, "VariableDeclaration").forEach((stmt) => {
+      const node = (stmt as ts.VariableDeclaration).type!;
+      const type = checker.getTypeAtLocation(node);
+      const elmType = buildEncoder(type, "value", checker, new Map(), 8, node);
       expect(elmType).toEqual(elmTypeRef);
     });
     expect.assertions(1);
