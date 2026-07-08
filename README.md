@@ -46,7 +46,7 @@ class SizeObserver extends CustomElement<{
             height: this.offsetHeight,
           });
           this.#timeout = null;
-        });
+        }, this.debounce);
       }
     });
 
@@ -472,9 +472,6 @@ The generated modules are meant to be committed-or-regenerated, not hand-edited.
 }
 ```
 
-> [!TIP]
-> The CLI does not create the output directory for you, so make sure it exists (e.g. commit a `.gitkeep`, or `mkdir -p` first).
-
 ### 4. Tell Elm about the generated modules
 
 By default the generated modules use **flat module names** (e.g. `SizeObserver`, not `Components.SizeObserver`). Elm requires a module's name to match its path _relative to a source directory_, so the output directory must itself be a source directory. Add it to your `elm.json`:
@@ -623,7 +620,7 @@ Union types are supported with the following limitations:
 
 - There is special case support for `undefined | someType`, which will be translated to `Maybe SomeType`. For this to work, you will need `strictNullChecks` enabled in your tsconfig.
 
-Intersection types are supported in an experimental and rudimentary way. Best avoided, but they may work.
+Intersections of object types are merged into a single flat Elm record — e.g. `{ a: string } & { b: number }` becomes `{ a : String, b : Float }`. Only object intersections work; intersecting with non-object types, or members with overlapping keys, is not handled.
 
 String-keyed dictionaries are supported: a `Record<string, X>` or an index signature `{ [key: string]: X }` is translated to an Elm `Dict String X` (with the corresponding `Json.Encode`/`Json.Decode` code). This only applies when the type has no named properties as well, since Elm dictionaries are homogeneous.
 
@@ -631,14 +628,9 @@ Enums are supported and become an Elm custom type with one constructor per membe
 
 Tuples are supported for 2 and 3 elements (e.g. `[string, number]` becomes `( String, Float )`), encoded as a positional JSON array. Elm has no tuples with 4 or more elements, so those are rejected — use a record instead.
 
-Template literal types with a single `string` or `number` placeholder are supported when declared as a named `type` (e.g. `type ItemId = \`item-${string}\``). Their representation depends on direction:
+Named template literal types with a single `string` or `number` placeholder (e.g. `type ItemId = \`item-${string}\``) map to an opaque Elm type with a `Maybe`-returning smart constructor that validates the pattern when used as a property (outbound), and to a plain `String` when received in an event (inbound), since an opaque value you can't unwrap would be useless there.
 
-- **Outbound** (a property you pass into the element): the type becomes an opaque Elm type (`type ItemId = ItemId String`) with a smart constructor that returns `Maybe`, rejecting strings that don't match the pattern (here, anything not starting with `item-`). This gives you validation at the point where you construct the value.
-- **Inbound** (a value handed back to you in an event payload): the type becomes a plain `String`. An opaque type would be useless here, since its constructor isn't exposed and you couldn't unwrap the value. (Inbound is also more lenient — anonymous and multi-placeholder template literals are accepted as `String`.)
-
-Anonymous (inline) template literals and multi-placeholder patterns are not supported in the outbound direction, since there'd be no name for the opaque type.
-
-By default `number` is encoded in Elm as `Float`. To generate an Elm `Int` instead, use the exported `Int` type, which is a [branded](https://egghead.io/blog/using-branded-types-in-typescript) `number` (it behaves like a `number` at runtime and in arithmetic, but the generator detects it and emits `Int` with `Encode.int` / `Decode.int`):
+By default `number` is encoded in Elm as `Float`. To generate an Elm `Int` instead, use the exported `Int` type, which is a branded `number` — it is `number` at runtime and in arithmetic, but the generator detects the brand and emits `Int` with `Encode.int` / `Decode.int`:
 
 ```ts
 import { Int } from "elm-webcomponents";
@@ -679,8 +671,8 @@ class Clock extends CustomElement<{ requiredEvents: { fire: { at: Posix } } }> {
 
 Generates a module that `import Time`, types `start` as `Time.Posix`, encodes it with your function, and decodes the event payload with your decoder. Like `Int`, the brand is a runtime-transparent version of the underlying type (here `number`), is detected structurally so it works when nested, and its imports are collected and deduplicated across the module. Contract details:
 
-- The **decoder** must be a complete `Json.Decode.Decoder` expression for your Elm type (it is emitted verbatim). It's optional — omit it (or pass `""`) for a type that only flows *out* of Elm (a property). Using such a type in an event payload is then a generation error.
-- The **encoder** must be a function from your Elm type to `Json.Encode.Value` (the generator applies it to the value). It's optional in the same way, for a type that only flows *into* Elm (an event).
+- The **decoder** must be a complete `Json.Decode.Decoder` expression for your Elm type (it is emitted verbatim). It's optional — omit it (or pass `""`) for a type that only flows _out_ of Elm (a property). Using such a type in an event payload is then a generation error.
+- The **encoder** must be a function from your Elm type to `Json.Encode.Value` (the generator applies it to the value). It's optional in the same way, for a type that only flows _into_ Elm (an event).
 - The **modules** field is a tuple of fully-qualified Elm module names (e.g. `["Time"]`); the generator emits `import <Module>` for each, so they're always imported unqualified (avoiding conflicting-alias problems between usages). `Json.Decode as Decode` and `Json.Encode as Encode` are always in scope. Omit the field (`[]`) if no extra modules are needed.
 
 ### Status

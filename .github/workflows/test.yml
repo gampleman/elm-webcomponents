@@ -28,3 +28,40 @@ jobs:
 
       - name: "Pre-publish"
         run: npx pkg-pr-new publish
+
+  publish-npm:
+    name: Publish npm package
+    if: github.ref == 'refs/heads/master'
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Check if publish needed
+        id: check
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view elm-webcomponents version 2>/dev/null || echo "0.0.0")
+          if [ "$CURRENT" != "$PUBLISHED" ]; then
+            echo "publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "publish=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install and build
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish with provenance
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish --provenance --access public

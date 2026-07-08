@@ -1,7 +1,7 @@
 {
   "name": "elm-webcomponents",
-  "version": "0.1.0",
-  "description": "",
+  "version": "1.0.0",
+  "description": "Generate Elm modules from annotated Typescript web components",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.cts",
@@ -23,12 +23,12 @@
     "test": "jest",
     "build": "pkgroll",
     "prepare": "pkgroll",
-    "e2e": "mkdir -p example/elm-webcomponents && tsx src/cli.ts -o example/elm-webcomponents example/component.ts && elm-format --yes example/elm-webcomponents && elm make example/elm-webcomponents/*.elm",
+    "e2e": "tsx src/cli.ts -o example/elm-webcomponents example/component.ts && elm-format --yes example/elm-webcomponents && elm make example/elm-webcomponents/*.elm",
     "dev": "vite dev",
     "prepublishOnly": "agadoo"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Jakub Hampl <honitom@seznam.cz>",
+  "license": "MIT",
   "devDependencies": {
     "@types/jest": "^29.5.13",
     "agadoo": "^3.0.0",

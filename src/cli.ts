@@ -1,5 +1,5 @@
 import { command, run, string, restPositionals, option } from "cmd-ts";
-import { ExistingPath, Directory } from "cmd-ts/batteries/fs";
+import { ExistingPath } from "cmd-ts/batteries/fs";
 import { main } from "./transform";
 import pkg from "../package.json";
 
@@ -9,8 +9,10 @@ const app = command({
   description: "Generates Elm code from annotated web components",
   args: {
     outputDir: option({
-      type: Directory,
-      description: "Output directory for generated Elm files",
+      // A plain string (not cmd-ts's `Directory`, which requires the path to
+      // already exist): `main` creates the output directory if needed.
+      type: string,
+      description: "Output directory for generated Elm files (created if missing)",
       long: "output-dir",
       short: "o",
       defaultValue() {
