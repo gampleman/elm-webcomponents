@@ -22,6 +22,12 @@ describe.each([
     `Decode.succeed (\\if_ -> { if_ = if_ })
       |> Decode.map2 (|>) (Decode.field "if" (Decode.string))`,
   ],
+  ["Record<string, number>", "Decode.dict (Decode.float)"],
+  [
+    "Record<string, { x: number }>",
+    `Decode.dict (Decode.succeed (\\x -> { x = x })
+      |> Decode.map2 (|>) (Decode.field "x" (Decode.float)))`,
+  ],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `

@@ -48,9 +48,15 @@ function extractEventsFromTypeVar(
 
 export const transform = (
   inputFiles: string[],
-  program: ts.Program
+  program: ts.Program,
+  modulePrefix = ""
 ): Map<string, string> => {
   const checker = program.getTypeChecker();
+  // Normalize the prefix into a trailing-dot form ("Components." or "") so it
+  // can be concatenated directly onto each generated module name.
+  const normalizedPrefix = modulePrefix
+    ? modulePrefix.replace(/\.+$/, "") + "."
+    : "";
   const outputInfos = inputFiles
     .flatMap((fileName) => {
       const ast = program.getSourceFile(fileName);
@@ -290,7 +296,7 @@ export const transform = (
               lazy: lazyAttributes,
             },
             events,
-            moduleName: symbol.getName(),
+            moduleName: normalizedPrefix + symbol.getName(),
             moduleComments: ts.displayPartsToString(
               symbol.getDocumentationComment(checker)
             ),
@@ -316,23 +322,33 @@ export const transform = (
 
   const output = new Map<string, string>();
   outputInfos.forEach((info) => {
-    output.set(info.moduleName + ".elm", formatElmFile(info));
+    // A dotted module name (from --module-prefix) maps to a nested path, since
+    // Elm requires a module's file path to mirror its name.
+    const relativePath = info.moduleName.split(".").join(path.sep) + ".elm";
+    output.set(relativePath, formatElmFile(info));
   });
   return output;
 };
 
 export const main = ({
   outputDir,
+  modulePrefix,
   inputFiles,
 }: {
   inputFiles: string[];
   outputDir: string;
+  modulePrefix?: string;
 }) => {
   try {
     const program = ts.createProgram(inputFiles, { strictNullChecks: true });
-    const output = transform(inputFiles, program);
+    const output = transform(inputFiles, program, modulePrefix);
     [...output.entries()].forEach(([fileName, content]) => {
-      fs.writeFileSync(path.join(outputDir, fileName), content);
+      const target = path.join(outputDir, fileName);
+      // A dotted module prefix maps to nested directories (e.g.
+      // Components.MyElement -> Components/MyElement.elm), so make sure the
+      // subdirectory exists before writing.
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
     });
   } catch (e) {
     if (e instanceof TransformError) {
@@ -469,6 +485,21 @@ const formatElmFile = (info: OutputInfo) => {
   ];
   const scope = buildScope(scopeNames);
 
+  // A `Dict String X` type only appears in the Elm type annotations produced by
+  // buildType (the `Encode.dict`/`Decode.dict` functions live in the Json
+  // modules we already import), so scanning the type expressions and generated
+  // type definitions is enough to decide whether to import `Dict`.
+  const allAttrs = [
+    ...info.properties.optional,
+    ...info.properties.required,
+    ...info.properties.lazy,
+    ...info.events.optional,
+    ...info.events.required,
+  ];
+  const usesDict =
+    allAttrs.some((attr) => /\bDict\b/.test(attr.elmType.expression)) ||
+    Array.from(info.typeDefs.values()).some((def) => /\bDict\b/.test(def));
+
   return `module ${info.moduleName} exposing (${exposing.join(", ")})
 
 {-| ${info.moduleComments}
@@ -481,6 +512,7 @@ import Html.Attributes
 import Html.Events
 import Json.Encode as Encode
 import Json.Decode as Decode
+${usesDict ? "import Dict exposing (Dict)" : ""}
 ${info.properties.lazy.length > 0 ? "import Html.Lazy" : ""}
 
 ${Array.from(info.typeDefs.values()).join("\n\n")}

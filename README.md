@@ -477,7 +477,7 @@ The generated modules are meant to be committed-or-regenerated, not hand-edited.
 
 ### 4. Tell Elm about the generated modules
 
-The generated modules use **flat module names** (e.g. `SizeObserver`, not `Components.SizeObserver`). Elm requires a module's name to match its path _relative to a source directory_, so the output directory must itself be a source directory. Add it to your `elm.json`:
+By default the generated modules use **flat module names** (e.g. `SizeObserver`, not `Components.SizeObserver`). Elm requires a module's name to match its path _relative to a source directory_, so the output directory must itself be a source directory. Add it to your `elm.json`:
 
 ```jsonc
 // elm.json
@@ -488,6 +488,8 @@ The generated modules use **flat module names** (e.g. `SizeObserver`, not `Compo
   ],
 }
 ```
+
+If you'd rather namespace the generated modules under an existing source directory, pass `--module-prefix` (short `-p`). For example, `elm-webcomponents -o src --module-prefix Components src/components/*.ts` emits `module Components.SizeObserver` into `src/Components/SizeObserver.elm`, so no extra source directory is needed — just make sure the prefix directory sits inside one you already list.
 
 If you use `elm-review`, you'll also want to exclude the generated directory, since the output isn't meant to satisfy every lint (e.g. it may import `Json.Encode` even for a component that only has events):
 
@@ -622,6 +624,8 @@ Union types are supported with the following limitations:
 - There is special case support for `undefined | someType`, which will be translated to `Maybe SomeType`. For this to work, you will need `strictNullChecks` enabled in your tsconfig.
 
 Intersection types are supported in an experimental and rudimentary way. Best avoided, but they may work.
+
+String-keyed dictionaries are supported: a `Record<string, X>` or an index signature `{ [key: string]: X }` is translated to an Elm `Dict String X` (with the corresponding `Json.Encode`/`Json.Decode` code). This only applies when the type has no named properties as well, since Elm dictionaries are homogeneous.
 
 Finally, `number` is encoded in Elm as `Float`. At the moment there is no way to encode `Int`, but we also plan to investigate ways to deal with this deficiency.
 

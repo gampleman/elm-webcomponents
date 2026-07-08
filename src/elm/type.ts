@@ -99,7 +99,7 @@ export const buildType = (
     node = lastNode;
   }
 
-  const error = (message: string) => {
+  const error = (message: string): never => {
     throw new TransformError(node, message);
   };
 
@@ -144,7 +144,7 @@ export const buildType = (
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
-      error("Emtpy/void types not supported");
+      error("Void/undefined/null types are not supported as a type on their own");
     case ts.TypeFlags.Never:
       return elm`Never`;
 
@@ -157,6 +157,17 @@ export const buildType = (
           checker,
           node
         )})`;
+      }
+
+      // A string index signature (`Record<string, X>` or `{ [key: string]: X }`)
+      // maps to an Elm `Dict String X`. We only treat it as a Dict when there are
+      // no named properties, since Elm dictionaries are homogeneous.
+      const stringIndexType = checker.getIndexTypeOfType(
+        type,
+        ts.IndexKind.String
+      );
+      if (stringIndexType && checker.getPropertiesOfType(type).length === 0) {
+        return elm`Dict String (${buildType(stringIndexType, checker, node)})`;
       }
 
       if (type.aliasSymbol) {
@@ -349,11 +360,6 @@ export const buildType = (
     //   return `Debug.todo`;
 
     default:
-      error(
-        `Advanced types not supported (${type.flags}): ${checker.typeToString(
-          type
-        )}`
-      );
       return error(
         `Advanced types not supported (${type.flags}): ${checker.typeToString(
           type

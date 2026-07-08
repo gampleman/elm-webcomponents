@@ -1,24 +1,39 @@
 import * as ts from "typescript";
 import { toValueCase, toTypeCase, introduce } from "./utils";
+import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
   console.warn(`${name} is not implemented for encoders`);
   return `Debug.todo "${name} is not implemented for encoders"`;
 };
 
+// Elm's layout parser is whitespace-sensitive: the only construct we emit that
+// *requires* line breaks is `case`, whose branches must be indented strictly
+// deeper than any enclosing branch. We thread `indent` (the column of this
+// expression's case branches) through the recursion and bump it by `INDENT_STEP`
+// whenever we descend into a case branch body, so arbitrarily nested unions stay
+// well-indented. Everything else is emitted on a single line, which parses at any
+// depth. `elm-format` reprints the result, so we only need it to parse.
+const INDENT_STEP = 4;
+
 export const buildEncoder = (
   type: ts.Type,
   value: string,
   checker: ts.TypeChecker,
-  scope: Map<string, number>
+  scope: Map<string, number>,
+  indent = 8
 ): string => {
   let variable, newScope;
+  const branchIndent = " ".repeat(indent);
+  const error = (message: string): never => {
+    throw new TransformError(nodeFromType(type), message);
+  };
   switch (type.flags) {
     case ts.TypeFlags.Any:
-      throw new Error("Any type not supported");
+      error("Any type is not supported: its shape is unknown so no encoder can be generated");
     case ts.TypeFlags.Unknown:
-      throw new Error(
-        "The type was Unknown, but we need to know the type to infer an encoder"
+      error(
+        "Unknown type is not supported: its shape is unknown so no encoder can be generated"
       );
     case ts.TypeFlags.String:
       return `Encode.string ${value}`;
@@ -32,7 +47,7 @@ export const buildEncoder = (
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
-      throw new Error("BigInt type not supported");
+      error("BigInt type is not supported: Elm has no BigInt equivalent");
     case ts.TypeFlags.StringLiteral:
       return `Encode.string "${type.isStringLiteral() && type.value}"`;
 
@@ -45,14 +60,14 @@ export const buildEncoder = (
 
     case ts.TypeFlags.ESSymbol:
     case ts.TypeFlags.UniqueESSymbol:
-      throw new Error("Any type not supported");
+      error("Symbol type is not supported: symbols cannot be serialized to JSON");
 
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
       return `Encode.null`;
     case ts.TypeFlags.Never:
-      throw new Error("Emtpy/void types not supported");
+      error("Never type is not supported: it has no runtime representation");
 
     case ts.TypeFlags.TypeParameter:
       return todo("TypeParameter");
@@ -63,7 +78,23 @@ export const buildEncoder = (
           checker.getTypeArguments(type as ts.TypeReference)[0],
           variable,
           checker,
-          newScope
+          newScope,
+          indent + INDENT_STEP
+        )}) ${value}`;
+      }
+
+      const stringIndexType = checker.getIndexTypeOfType(
+        type,
+        ts.IndexKind.String
+      );
+      if (stringIndexType && checker.getPropertiesOfType(type).length === 0) {
+        [variable, newScope] = introduce("v", scope);
+        return `Encode.dict identity (\\${variable} -> ${buildEncoder(
+          stringIndexType,
+          variable,
+          checker,
+          newScope,
+          indent + INDENT_STEP
         )}) ${value}`;
       }
 
@@ -75,10 +106,11 @@ export const buildEncoder = (
               checker.getTypeOfSymbol(prop),
               `${value}.${toValueCase(prop.getName())}`,
               checker,
-              scope
+              scope,
+              indent
             )} )`
         )
-        .join("\n    , ")}]`;
+        .join(" , ")} ]`;
 
     case ts.TypeFlags.Union:
       let refType = (
@@ -98,38 +130,45 @@ export const buildEncoder = (
           scope
         );
         return `case (${value}) of
-    Nothing -> Encode.null
-    Just ${variable} -> ${buildEncoder(subtype, variable, checker, newScope)}
-`;
+${branchIndent}Nothing -> Encode.null
+${branchIndent}Just ${variable} -> ${buildEncoder(
+          subtype,
+          variable,
+          checker,
+          newScope,
+          indent + INDENT_STEP
+        )}`;
       }
       return `case (${value}) of
-        ${refType.types
-          .map((t) => {
-            if (t.isStringLiteral()) {
-              return `${toTypeCase(t.value)} -> ${buildEncoder(
-                t,
-                value,
-                checker,
-                scope
-              )}`;
-            } else {
-              let prop = t
-                .getProperties()
-                .map((sym) =>
-                  checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
-                )
-                .find((ts) => ts.isStringLiteral())?.value;
-              [variable, newScope] = introduce(toValueCase(prop), scope);
+${branchIndent}${refType.types
+        .map((t) => {
+          if (t.isStringLiteral()) {
+            return `${toTypeCase(t.value)} -> ${buildEncoder(
+              t,
+              value,
+              checker,
+              scope,
+              indent + INDENT_STEP
+            )}`;
+          } else {
+            let prop = t
+              .getProperties()
+              .map((sym) =>
+                checker.getTypeOfSymbolAtLocation(sym, sym.valueDeclaration)
+              )
+              .find((ts) => ts.isStringLiteral())?.value;
+            [variable, newScope] = introduce(toValueCase(prop), scope);
 
-              return `${toTypeCase(prop)} ${variable} -> ${buildEncoder(
-                t,
-                variable,
-                checker,
-                newScope
-              )}`;
-            }
-          })
-          .join("\n        ")}`;
+            return `${toTypeCase(prop)} ${variable} -> ${buildEncoder(
+              t,
+              variable,
+              checker,
+              newScope,
+              indent + INDENT_STEP
+            )}`;
+          }
+        })
+        .join("\n" + branchIndent)}`;
 
     case ts.TypeFlags.Intersection:
       return `Encode.object [ ${checker
@@ -140,10 +179,11 @@ export const buildEncoder = (
               checker.getTypeOfSymbol(prop),
               `${value}.${toValueCase(prop.getName())}`,
               checker,
-              scope
+              scope,
+              indent
             )} )`
         )
-        .join("\n    , ")}]`;
+        .join(" , ")} ]`;
 
     // case ts.TypeFlags.Index:
     //   // TODO: ???
@@ -177,6 +217,10 @@ export const buildEncoder = (
     //   return `Debug.todo`;
 
     default:
-      throw new Error("Advanced types not supported");
+      return error(
+        `Advanced types not supported (${
+          type.flags
+        }): ${checker.typeToString(type)}`
+      );
   }
 };

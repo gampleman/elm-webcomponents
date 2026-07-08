@@ -133,6 +133,10 @@ export class ReactyThing extends CustomElement<{
   @required
   accessor test: { foo: string } & { bar: number };
 
+  /** A dictionary of arbitrary string-keyed values. */
+  @optional
+  accessor metadata: Record<string, string>;
+
   init() {
     this.#root = {
       html: document.createElement("div"),

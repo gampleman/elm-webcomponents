@@ -10,6 +10,9 @@ describe.each([
   ["number[]", "List (Float)"],
   ["{foo: number[]}[]", "List ({ foo : List (Float) })"],
   ["{if: string}", "{ if_ : String }"],
+  ["Record<string, number>", "Dict String (Float)"],
+  ["{ [key: string]: string }", "Dict String (String)"],
+  ["Record<string, { x: number }>", "Dict String ({ x : Float })"],
 ])("simple types %s converts to %s", (tsType, elmType) => {
   test("converts types correctly", () => {
     const source = `

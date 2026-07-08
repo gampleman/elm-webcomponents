@@ -1,5 +1,6 @@
 import * as ts from "typescript";
 import { toValueCase, toTypeCase, introduce } from "./utils";
+import { TransformError, nodeFromType } from "../error";
 
 const todo = (name: string) => {
   console.warn(`${name} is not implemented for decoders`);
@@ -17,12 +18,16 @@ export const buildDecoder = (
   let properties: ts.Symbol[];
   let propNames: string[];
 
+  const error = (message: string): never => {
+    throw new TransformError(nodeFromType(type), message);
+  };
+
   switch (type.flags) {
     case ts.TypeFlags.Any:
-      throw new Error("Any type not supported");
+      error("Any type is not supported: its shape is unknown so no decoder can be generated");
     case ts.TypeFlags.Unknown:
-      throw new Error(
-        "The type was Unknown, but we need to know the type to infer an encoder"
+      error(
+        "Unknown type is not supported: its shape is unknown so no decoder can be generated"
       );
     case ts.TypeFlags.String:
       return `Decode.string`;
@@ -36,7 +41,7 @@ export const buildDecoder = (
 
     case ts.TypeFlags.BigInt:
     case ts.TypeFlags.BigIntLiteral:
-      throw new Error("BigInt type not supported");
+      error("BigInt type is not supported: Elm has no BigInt equivalent");
     case ts.TypeFlags.StringLiteral:
       [variable, newScope] = introduce("str", scope);
       let t = type as ts.StringLiteralType;
@@ -52,13 +57,13 @@ export const buildDecoder = (
 
     case ts.TypeFlags.ESSymbol:
     case ts.TypeFlags.UniqueESSymbol:
-      throw new Error("Symbol type not supported");
+      error("Symbol type is not supported: symbols cannot be represented in JSON");
 
     case ts.TypeFlags.Void:
     case ts.TypeFlags.Undefined:
     case ts.TypeFlags.Null:
     case ts.TypeFlags.Never:
-      throw new Error("Emtpy/void types not supported");
+      error("Void/undefined/null/never types are not supported as a decoder target");
 
     case ts.TypeFlags.TypeParameter:
       return todo("TypeParameter");
@@ -69,6 +74,13 @@ export const buildDecoder = (
           checker,
           scope
         )})`;
+      }
+      const stringIndexType = checker.getIndexTypeOfType(
+        type,
+        ts.IndexKind.String
+      );
+      if (stringIndexType && checker.getPropertiesOfType(type).length === 0) {
+        return `Decode.dict (${buildDecoder(stringIndexType, checker, scope)})`;
       }
       properties = checker.getPropertiesOfType(type);
       let propies;
@@ -199,6 +211,10 @@ export const buildDecoder = (
     //   return `Debug.todo`;
 
     default:
-      throw new Error("Advanced types not supported");
+      return error(
+        `Advanced types not supported (${
+          type.flags
+        }): ${checker.typeToString(type)}`
+      );
   }
 };
