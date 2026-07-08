@@ -15,7 +15,9 @@
       "default": "./dist/index.mjs"
     }
   },
-  "bin": "./dist/cli.js",
+  "bin": {
+    "elm-webcomponents": "dist/cli.js"
+  },
   "scripts": {
     "start": "tsx src/cli.ts",
     "watch": "tsx watch src/cli.ts",
