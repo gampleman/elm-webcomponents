@@ -50,3 +50,44 @@ describe("module prefix", () => {
     );
   });
 });
+
+describe("custom ElmType imports", () => {
+  const COMPONENT_WITH_CUSTOM = `
+declare function component(name: string): any;
+declare function required(a: any, c: any): any;
+declare class CustomElement<T> {}
+
+type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> =
+  Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+type Posix = ElmType<number, "Time.Posix", "Decode.map Time.millisToPosix Decode.int", "\\\\p -> Encode.int (Time.posixToMillis p)", ["Time"]>;
+
+@component("clock-element")
+class ClockElement extends CustomElement<{}> {
+  @required accessor start!: Posix;
+}
+`;
+
+  test("a component using a custom type emits the required import", () => {
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+      if (fileName === "input.ts") {
+        return ts.createSourceFile(
+          fileName,
+          COMPONENT_WITH_CUSTOM,
+          ts.ScriptTarget.Latest
+        );
+      }
+      return orig(fileName, ...args);
+    };
+    const program = ts.createProgram(
+      ["input.ts"],
+      { strictNullChecks: true },
+      host
+    );
+    const output = transform(["input.ts"], program);
+    const elm = output.get("ClockElement.elm")!;
+    expect(elm).toContain("import Time");
+    expect(elm).toContain("start : Time.Posix");
+  });
+});

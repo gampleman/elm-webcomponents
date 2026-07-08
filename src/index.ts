@@ -1,8 +1,60 @@
 /**
- * Marks a `number` that should be generated as an Elm `Int` rather than a
- * `Float`. TypeScript has no distinct integer type, so this is a branded
- * `number`: it behaves like a `number` at runtime and in arithmetic, but the
- * code generator detects the brand and emits `Int` (with `Encode.int` /
+ * Maps a TypeScript type to an arbitrary Elm type of your choosing, letting you
+ * plug in Elm types the generator doesn't know about (e.g. `Time.Posix`), or
+ * override the default mapping for a built-in type.
+ *
+ * This is a branded version of a `Base` type: it behaves like `Base` at runtime,
+ * but the generator detects the brand and emits your Elm type, decoder and
+ * encoder instead of the default mapping for `Base`.
+ *
+ * The type parameters are all string literals (or a string tuple) the generator
+ * reads:
+ * - `Name` — the Elm type expression, e.g. `"Time.Posix"`.
+ * - `Decoder` — a complete `Json.Decode.Decoder Name` expression, emitted
+ *   verbatim, e.g. `"Decode.map Time.millisToPosix Decode.int"`. Optional: omit
+ *   it (or pass `""`) for types that only flow *out* of Elm (properties); using
+ *   such a type in an event payload is then a generation error.
+ * - `Encoder` — a `Name -> Json.Encode.Value` function; the generator applies
+ *   it to the value, e.g. `"\\p -> Encode.int (Time.posixToMillis p)"`. Optional
+ *   in the same way, for types that only flow *into* Elm (events).
+ * - `Modules` — fully-qualified Elm module names the snippets reference, e.g.
+ *   `["Time"]`. The generator emits `import <Module>` for each (deduplicated),
+ *   so it always imports them unqualified — avoiding conflicting-alias problems
+ *   between different usages. Note that `Json.Decode as Decode` and
+ *  `Json.Encode as Encode` are guaranteed to be in scope, so do not need to be
+ *  explicitely specified here.
+ *
+ * @example
+ * ```ts
+ * type Posix = ElmType<
+ *   number,
+ *   "Time.Posix",
+ *   "Decode.map Time.millisToPosix Decode.int",
+ *   "\\p -> Encode.int (Time.posixToMillis p)",
+ *   ["Time"]
+ * >;
+ *
+ * @required accessor timestamp!: Posix;
+ * ```
+ */
+export type ElmType<
+  Base,
+  Name extends string,
+  Decoder extends string = "",
+  Encoder extends string = "",
+  Modules extends readonly string[] = [],
+> = Base & {
+  readonly __elmType__: Name;
+  readonly __elmDecoder__: Decoder;
+  readonly __elmEncoder__: Encoder;
+  readonly __elmModules__: Modules;
+};
+
+/**
+ * Marks a `number` that should be generated as an Elm `Int` rather than the
+ * default `Float`. TypeScript has no distinct integer type, so this is a branded
+ * `number` (a special case of {@link ElmType}): it behaves like a `number` at
+ * runtime and in arithmetic, but the generator emits `Int` (with `Encode.int` /
  * `Decode.int`).
  *
  * Assigning a numeric literal may require a cast, e.g. `this.count = 5 as Int`.
@@ -13,7 +65,7 @@
  * @required accessor size!: { width: Int; height: Int };
  * ```
  */
-export type Int = number & { readonly __elmInt__?: never };
+export type Int = ElmType<number, "Int", "Decode.int", "Encode.int">;
 
 /**
  * Defines how the in Elm the child nodes are going to be passed in.

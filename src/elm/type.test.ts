@@ -133,13 +133,15 @@ type alias Foo = { foo : String }`,
     "Foo",
   ],
   [
-    `type Int = number & { readonly __elmInt__?: never }`,
+    `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> = Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+     type Int = ElmType<number, "Int", "Decode.int", "Encode.int">`,
     "Int",
     new Map(),
     "Int",
   ],
   [
-    `type Int = number & { readonly __elmInt__?: never };
+    `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> = Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+     type Int = ElmType<number, "Int", "Decode.int", "Encode.int">;
      type Point = { x: Int; y: number }`,
     "Point",
     new Map([["Point", "type alias Point = { x : Int, y : Float }"]]),
@@ -258,6 +260,40 @@ describe("nested template literal", () => {
       // the record references the opaque Size, and its definitions are carried up
       expect(elmType.definitions.get("Size")).toEqual("type Size\n    = Size String");
       expect(elmType.definitions.has("size")).toBe(true);
+    });
+    expect.assertions(2);
+  });
+});
+
+// A user-defined ElmType<...> brand maps to an arbitrary Elm type and carries
+// its required module imports, structurally (so it also works nested in records).
+const ELM_TYPE_DEF = `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> =
+  Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+type Posix = ElmType<number, "Time.Posix", "Decode.map Time.millisToPosix Decode.int", "\\\\p -> Encode.int (Time.posixToMillis p)", ["Time"]>;`;
+
+describe("custom ElmType brand", () => {
+  test.each([
+    ["Posix", "Time.Posix"],
+    ["Posix[]", "List (Time.Posix)"],
+    ["{ at: Posix }", "{ at : Time.Posix }"],
+  ])("%s maps to %s and carries imports", (tsTypeRef, elmTypeRef) => {
+    const source = `${ELM_TYPE_DEF}\n\nlet target : ${tsTypeRef};`;
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+      if (fileName == "input.ts") {
+        return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest);
+      }
+      return orig(fileName, ...args);
+    };
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
+    const checker = program.getTypeChecker();
+    const ast = program.getSourceFile("input.ts")!;
+    query(ast, "VariableDeclaration").forEach((stmt) => {
+      const node = (stmt as ts.VariableDeclaration).type!;
+      const elmType = buildType(checker.getTypeAtLocation(node), checker, node);
+      expect(elmType.expression).toEqual(elmTypeRef);
+      expect(elmType.imports).toEqual(["import Time"]);
     });
     expect.assertions(2);
   });

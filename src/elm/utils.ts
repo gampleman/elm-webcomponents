@@ -34,25 +34,76 @@ export const propertyTypeNode = (prop: ts.Symbol): ts.Node | undefined => {
   return undefined;
 };
 
-/** The brand property carried by the library's `Int` type. */
-const ELM_INT_BRAND = "__elmInt__";
+export type CustomTypeInfo = {
+  /** The Elm type expression, e.g. `Time.Posix`. */
+  typeName: string;
+  /** A complete `Decoder` expression, emitted verbatim; `""` if not provided. */
+  decoder: string;
+  /** A `X -> Encode.Value` function applied to the value; `""` if not provided. */
+  encoder: string;
+  /** Fully-qualified Elm module names to `import` (unqualified). */
+  modules: string[];
+};
+
+/** Reads a string-literal-typed property off any member of an intersection. */
+const readStringBrand = (
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  propName: string
+): string | undefined => {
+  if (!type.isIntersection()) {
+    return undefined;
+  }
+  for (const member of type.types) {
+    const prop = checker.getPropertyOfType(member, propName);
+    if (prop) {
+      const propType = checker.getTypeOfSymbol(prop);
+      if (propType.isStringLiteral()) {
+        return propType.value;
+      }
+    }
+  }
+  return undefined;
+};
 
 /**
- * Detects the library's branded `Int` type (`number & { __elmInt__?: never }`),
- * which the user uses to request an Elm `Int` instead of a `Float`. It presents
- * to the checker as an intersection of a `number` and a brand object carrying
- * the {@link ELM_INT_BRAND} property, and is detected structurally so it also
- * works when nested inside records, tuples, arrays, etc.
+ * Detects a user-defined `ElmType<...>` brand (see the library's `ElmType`),
+ * which maps a TypeScript type to an arbitrary Elm type with its own decoder,
+ * encoder and modules. Returns the extracted mapping, or `null` if `type` is not
+ * such a brand. `decoder`/`encoder` are `""` when the user omitted them.
+ * Detected structurally, so it works nested anywhere.
  */
-export const isElmInt = (type: ts.Type, checker: ts.TypeChecker): boolean => {
-  if (!type.isIntersection()) {
-    return false;
+export const customTypeInfo = (
+  type: ts.Type,
+  checker: ts.TypeChecker
+): CustomTypeInfo | null => {
+  const typeName = readStringBrand(type, checker, "__elmType__");
+  // A genuine ElmType brand always carries the decoder/encoder brand props (as
+  // string literals, possibly empty); their absence means this isn't one.
+  const decoder = readStringBrand(type, checker, "__elmDecoder__");
+  const encoder = readStringBrand(type, checker, "__elmEncoder__");
+  if (typeName == null || decoder == null || encoder == null) {
+    return null;
   }
-  const hasNumber = type.types.some((m) => (m.flags & ts.TypeFlags.Number) !== 0);
-  const hasBrand = type.types.some((m) =>
-    checker.getPropertiesOfType(m).some((p) => p.getName() === ELM_INT_BRAND)
-  );
-  return hasNumber && hasBrand;
+
+  // The modules brand is a tuple of string literals (defaulting to empty).
+  let modules: string[] = [];
+  if (type.isIntersection()) {
+    for (const member of type.types) {
+      const prop = checker.getPropertyOfType(member, "__elmModules__");
+      if (prop) {
+        const propType = checker.getTypeOfSymbol(prop);
+        if (checker.isTupleType(propType)) {
+          modules = checker
+            .getTypeArguments(propType as ts.TypeReference)
+            .map((el) => (el.isStringLiteral() ? el.value : ""))
+            .filter((s) => s !== "");
+        }
+      }
+    }
+  }
+
+  return { typeName, decoder, encoder, modules };
 };
 
 /**

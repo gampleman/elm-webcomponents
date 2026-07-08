@@ -302,6 +302,16 @@ export const transform = (
           const getTypeDefs = (attrs: Attr[]) => {
             return attrs.flatMap((attr) => [...attr.elmType.definitions]);
           };
+          const getImports = (attrs: Attr[]) => {
+            return attrs.flatMap((attr) => attr.elmType.imports ?? []);
+          };
+          const allAttrLists = [
+            optionalAttributes,
+            requiredAttributes,
+            lazyAttributes,
+            events.required,
+            events.optional,
+          ];
 
           return {
             viewFnName,
@@ -329,6 +339,10 @@ export const transform = (
               ...getTypeDefs(events.required),
               ...getTypeDefs(events.optional),
             ]),
+            // Imports required by custom `ElmType<...>` mappings, deduplicated.
+            customImports: [
+              ...new Set(allAttrLists.flatMap(getImports)),
+            ],
           };
         }
       });
@@ -399,6 +413,7 @@ type OutputInfo = {
   htmlContent: HtmlContent;
   attributesArg: boolean;
   typeDefs: Map<string, string>;
+  customImports: string[];
 };
 
 const htmlContentToTypeSig = (htmlContent: HtmlContent): string => {
@@ -544,6 +559,7 @@ import Json.Encode as Encode
 import Json.Decode as Decode
 ${usesDict ? "import Dict exposing (Dict)" : ""}
 ${info.properties.lazy.length > 0 ? "import Html.Lazy" : ""}
+${info.customImports.join("\n")}
 
 ${Array.from(info.typeDefs.values()).join("\n\n")}
 

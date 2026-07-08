@@ -7,6 +7,7 @@ import {
   IsolatedCustomElement,
   type HtmlContent,
   type Int,
+  ElmType,
 } from "../src";
 
 import { Foo } from "./related";
@@ -28,6 +29,14 @@ interface Box {
 }
 
 type Size = `${number}px`;
+
+type Posix = ElmType<
+  number,
+  "Time.Posix",
+  "Decode.map Time.millisToPosix Decode.int", // a complete `Decoder Time.Posix`
+  "\\p -> Encode.int (Time.posixToMillis p)", // a `Time.Posix -> Encode.Value` function
+  ["Time"] // imports the snippets need
+>;
 
 /** Observes an element and triggers events whenever the contents size changes. */
 @component("size-observer")
@@ -136,6 +145,9 @@ export class ReactyThing extends CustomElement<{
 
   @required
   accessor test!: { foo: string } & { bar: number };
+
+  @optional
+  accessor time: Posix = 0 as Posix;
 
   /** A dictionary of arbitrary string-keyed values. */
   @optional

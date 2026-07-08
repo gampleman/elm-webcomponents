@@ -655,6 +655,34 @@ class Counter extends CustomElement<{}> {
 
 Because TypeScript has no distinct integer type, assigning a numeric literal to an `Int` may require a cast, e.g. `this.count = 5 as Int`. The `Int` brand is detected structurally, so it works anywhere a number can appear — nested in records, arrays, tuples, `Dict` values, and so on.
 
+### Custom Elm types
+
+`Int` is really a special case of a general mechanism: you can map any TypeScript type to an Elm type of your choosing with the `ElmType` brand. This lets you plug in Elm types the generator doesn't know about (e.g. `Time.Posix`). You supply the Elm type name, a decoder, an encoder, and the modules the snippets need:
+
+```ts
+import { ElmType, component, required, CustomElement } from "elm-webcomponents";
+
+type Posix = ElmType<
+  number, // the underlying (runtime) TypeScript type
+  "Time.Posix", // the Elm type expression
+  "Decode.map Time.millisToPosix Decode.int", // a complete `Decoder Time.Posix`
+  "\\p -> Encode.int (Time.posixToMillis p)", // a `Time.Posix -> Encode.Value` function
+  ["Time"] // modules the snippets reference
+>;
+
+@component("clock-element")
+class Clock extends CustomElement<{ requiredEvents: { fire: { at: Posix } } }> {
+  @required
+  accessor start!: Posix;
+}
+```
+
+Generates a module that `import Time`, types `start` as `Time.Posix`, encodes it with your function, and decodes the event payload with your decoder. Like `Int`, the brand is a runtime-transparent version of the underlying type (here `number`), is detected structurally so it works when nested, and its imports are collected and deduplicated across the module. Contract details:
+
+- The **decoder** must be a complete `Json.Decode.Decoder` expression for your Elm type (it is emitted verbatim). It's optional — omit it (or pass `""`) for a type that only flows *out* of Elm (a property). Using such a type in an event payload is then a generation error.
+- The **encoder** must be a function from your Elm type to `Json.Encode.Value` (the generator applies it to the value). It's optional in the same way, for a type that only flows *into* Elm (an event).
+- The **modules** field is a tuple of fully-qualified Elm module names (e.g. `["Time"]`); the generator emits `import <Module>` for each, so they're always imported unqualified (avoiding conflicting-alias problems between usages). `Json.Decode as Decode` and `Json.Encode as Encode` are always in scope. Omit the field (`[]`) if no extra modules are needed.
+
 ### Status
 
 This is beta software. Please report issues as you encounter them.

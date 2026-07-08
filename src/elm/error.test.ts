@@ -118,3 +118,62 @@ describe("anonymous template literals", () => {
     });
   });
 });
+
+describe("custom ElmType used in an unsupported direction", () => {
+  const ELM_TYPE_DEF = `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> =
+  Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };`;
+
+  const withCustom = (
+    defs: string,
+    fn: (type: ts.Type, checker: ts.TypeChecker, node: ts.Node) => void
+  ) => {
+    const source = `${ELM_TYPE_DEF}\n${defs}\nlet target : Custom;`;
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) =>
+      fileName == "input.ts"
+        ? ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest)
+        : orig(fileName, ...args);
+    const program = ts.createProgram(
+      ["input.ts"],
+      { strictNullChecks: true },
+      host
+    );
+    const checker = program.getTypeChecker();
+    const ast = program.getSourceFile("input.ts")!;
+    query(ast, "VariableDeclaration").forEach((stmt) => {
+      const node = (stmt as ts.VariableDeclaration).type!;
+      fn(checker.getTypeAtLocation(node), checker, node);
+    });
+  };
+
+  test("a decoder-less type cannot be decoded (used in an event)", () => {
+    expect.assertions(1);
+    // Encoder only, no decoder.
+    withCustom(
+      `type Custom = ElmType<string, "Foo", "", "myEnc">;`,
+      (type, checker) => {
+        try {
+          buildDecoder(type, checker, new Map());
+        } catch (e) {
+          expect(e).toBeInstanceOf(TransformError);
+        }
+      }
+    );
+  });
+
+  test("an encoder-less type cannot be encoded (used in a property)", () => {
+    expect.assertions(1);
+    // Decoder only, no encoder.
+    withCustom(
+      `type Custom = ElmType<string, "Foo", "myDec">;`,
+      (type, checker) => {
+        try {
+          buildEncoder(type, "value", checker, new Map());
+        } catch (e) {
+          expect(e).toBeInstanceOf(TransformError);
+        }
+      }
+    );
+  });
+});

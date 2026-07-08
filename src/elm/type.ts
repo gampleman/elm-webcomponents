@@ -6,13 +6,15 @@ import {
   tupleElements,
   templateLiteralInfo,
   propertyTypeNode,
-  isElmInt,
+  customTypeInfo,
 } from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
 export type Type = {
   expression: string;
   definitions: Map<string, string>;
+  /** Elm import lines required by custom types nested anywhere in this type. */
+  imports?: string[];
 };
 
 const elm = (
@@ -36,6 +38,9 @@ const elm = (
       values.flatMap((v) =>
         typeof v == "string" ? [] : Array.from(v.definitions?.entries())
       )
+    ),
+    imports: values.flatMap((v) =>
+      typeof v == "string" ? [] : v.imports ?? []
     ),
   };
 };
@@ -117,10 +122,16 @@ export const buildType = (
     throw new TransformError(node, message);
   };
 
-  // The branded `Int` type presents as an intersection (number & brand), so it
-  // is detected before both the flag switch and the Intersection→record case.
-  if (isElmInt(type, checker)) {
-    return elm`Int`;
+  // A user-defined `ElmType<...>` brand (including the built-in `Int`) maps to
+  // an arbitrary Elm type. Detected before the enum/Intersection handling since
+  // it too presents as an intersection.
+  const customType = customTypeInfo(type, checker);
+  if (customType) {
+    return {
+      expression: customType.typeName,
+      definitions: new Map(),
+      imports: customType.modules.map((m) => `import ${m}`),
+    };
   }
 
   // A TypeScript `enum` arrives as a union of EnumLiteral members (not
@@ -296,6 +307,7 @@ ${ctor} raw =
             [toTypeCase(type.aliasSymbol.name), ref.expression],
             ...ref.definitions.entries(),
           ]),
+          imports: ref.imports,
         };
 
         return join([begin, ...args], " ");
@@ -319,6 +331,7 @@ ${ctor} raw =
               [toTypeCase(type.symbol.name), ref.expression],
               ...ref.definitions,
             ]),
+            imports: ref.imports,
           };
         case ts.ObjectFlags.Reference:
           const t = type as ts.TypeReference;
@@ -351,6 +364,7 @@ ${ctor} raw =
               [toTypeCase(t.target.symbol.name), ref.expression],
               ...ref.definitions.entries(),
             ]),
+            imports: ref.imports,
           };
 
           return join([begin, ...args], " ");

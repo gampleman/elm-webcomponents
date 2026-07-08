@@ -125,15 +125,17 @@ describe.each([
         Blue -> Encode.int 2`,
   ],
   [
-    `type Int = number & { readonly __elmInt__?: never }`,
+    `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> = Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+     type Int = ElmType<number, "Int", "Decode.int", "Encode.int">`,
     "Int",
-    `Encode.int value`,
+    `(Encode.int) value`,
   ],
   [
-    `type Int = number & { readonly __elmInt__?: never };
+    `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> = Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+     type Int = ElmType<number, "Int", "Decode.int", "Encode.int">;
      type Point = { x: Int; y: number }`,
     "Point",
-    `Encode.object [ ( "x", Encode.int value.x ) , ( "y", Encode.float value.y ) ]`,
+    `Encode.object [ ( "x", (Encode.int) value.x ) , ( "y", Encode.float value.y ) ]`,
   ],
 ])("%s type %s converts", (tsTypeDef, tsTypeRef, elmTypeRef) => {
   test("converts types correctly", () => {
@@ -197,6 +199,42 @@ describe.each([
       const type = checker.getTypeAtLocation(node);
       const elmType = buildEncoder(type, "value", checker, new Map(), 8, node);
       expect(elmType).toEqual(elmTypeRef);
+    });
+    expect.assertions(1);
+  });
+});
+
+// A custom ElmType brand applies its own encoder function to the value.
+const ELM_TYPE_DEF = `type ElmType<Base, Name extends string, Dec extends string = "", Enc extends string = "", Mods extends readonly string[] = []> =
+  Base & { readonly __elmType__: Name; readonly __elmDecoder__: Dec; readonly __elmEncoder__: Enc; readonly __elmModules__: Mods; };
+type Posix = ElmType<number, "Time.Posix", "Decode.map Time.millisToPosix Decode.int", "\\\\p -> Encode.int (Time.posixToMillis p)", ["Time"]>;`;
+
+describe.each([
+  ["Posix", `(\\p -> Encode.int (Time.posixToMillis p)) value`],
+  [
+    "Posix[]",
+    `Encode.list (\\el -> (\\p -> Encode.int (Time.posixToMillis p)) el) value`,
+  ],
+])("custom ElmType %s encodes", (tsTypeRef, elmTypeRef) => {
+  test("via its encoder function", () => {
+    const source = `${ELM_TYPE_DEF}\n\nlet target : ${tsTypeRef};`;
+    const host = ts.createCompilerHost({});
+    const orig = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+      if (fileName == "input.ts") {
+        return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest);
+      }
+      return orig(fileName, ...args);
+    };
+    const program = ts.createProgram(["input.ts"], { strict: true }, host);
+    const checker = program.getTypeChecker();
+    const ast = program.getSourceFile("input.ts")!;
+    query(ast, "VariableDeclaration").forEach((stmt) => {
+      const node = (stmt as ts.VariableDeclaration).type!;
+      const type = checker.getTypeAtLocation(node);
+      expect(buildEncoder(type, "value", checker, new Map(), 8, node)).toEqual(
+        elmTypeRef
+      );
     });
     expect.assertions(1);
   });

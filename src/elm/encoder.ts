@@ -7,7 +7,7 @@ import {
   tupleElements,
   templateLiteralInfo,
   propertyTypeNode,
-  isElmInt,
+  customTypeInfo,
 } from "./utils";
 import { TransformError, nodeFromType } from "../error";
 
@@ -39,10 +39,17 @@ export const buildEncoder = (
     throw new TransformError(node ?? nodeFromType(type), message);
   };
 
-  // The branded `Int` type presents as an intersection, so it must be handled
-  // before the Intersection→object case that would treat it as a record.
-  if (isElmInt(type, checker)) {
-    return `Encode.int ${value}`;
+  // A user-defined `ElmType<...>` brand (including the built-in `Int`) supplies
+  // its own encoder function, which we apply to the value. Detected before the
+  // Intersection→object case that would otherwise treat it as a record.
+  const customType = customTypeInfo(type, checker);
+  if (customType) {
+    if (!customType.encoder) {
+      error(
+        `The Elm type "${customType.typeName}" has no encoder, so it cannot be used as an outbound (property) value. Add the encoder argument to its ElmType<...> definition.`
+      );
+    }
+    return `(${customType.encoder}) ${value}`;
   }
 
   // A template literal type is an opaque newtype wrapping a String, so it
